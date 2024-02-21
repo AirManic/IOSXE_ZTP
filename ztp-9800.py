@@ -1,5 +1,5 @@
-# TODO docstrings .. top and functions
-# TODO transfrom into a Class construct to make the code more extensible beyond ZTP flow, where main() does not get called if used as import
+# TODO: docstrings .. top and functions
+# TODO: transfrom into a Class construct to make the code more extensible beyond ZTP flow, where main() does not get called if used as import
 
 # Importing cli module
 from cli import configure, cli, configurep, executep
@@ -31,7 +31,7 @@ xfer_servers = {
     'syslog': {my_svr, '10.85.134.6', '10.85.134.6'}
 }
 
-# TODO add SMU and APSP & APDP support
+# TODO: add SMU and APSP & APDP support
 software_mappings = {
     'C9800-80': {
         '17.13.01': {'img': 'C9800-80-universalk9_wlc.17.13.01.SPA.bin', 'md5': '35b30f64fca28112ab903733a44acde0'},
@@ -60,8 +60,10 @@ software_mappings = {
 
 def main():
 
+    log_tofile = False
+
     try:
-        # TODO configure SYSLOG setting per software_mapping table
+        # TODO: configure SYSLOG setting per software_mapping table
 
         # switch to enable/disable persistent logger
         if (log_tofile == False):
@@ -90,12 +92,12 @@ def main():
                     file_transfer(xfer_mode_image, xfer_servers, software_image)
 
                 #check to see if the file exists now and check MD5
-                # TODO simplify
+                # TODO: simplify
                 if check_file_exists(software_image):
                     if not verify_dst_image_md5(software_image, software_md5_checksum):
                         log_info('Failed Xfer file does not exist')
                         raise ValueError('Failed Xfer')
-                # TODO look for INSTALL vs BUNDLE mode from software_mappings table and flip if/where needed
+                # TODO: look for INSTALL vs BUNDLE mode from software_mappings table and flip if/where needed
                 deploy_eem_upgrade_script(software_image,'upgrade' )
                 log_info('Performing the upgrade - switch will reload')
                 cli('event manager run upgrade')
@@ -137,14 +139,14 @@ def configure_replace(file,file_system='flash:/' ):
     config_command = 'configure replace %s%s force' % (file_system, file)
     config_repl = executep(config_command)
     log_debug(config_repl)
-    # TODO sdiff to check if changes took effect
+    # TODO: sdiff to check if changes took effect
     
 def configure_merge(file,file_system='flash:/'):
     log_info('Trying to configure_merge(%s, %s)' % (file, file_system))
     config_command = 'copy %s%s running-config' %(file_system, file)
     config_repl = executep(config_command)
     log_debug(config_repl)
-    # TODO sdiff to check if changes took effect
+    # TODO: sdiff to check if changes took effect
 
 def check_file_exists(file, file_system='flash:/'):
     log_info('Trying to check_file_exists(%s, %s)' % (file, file_system))
@@ -174,7 +176,7 @@ def deploy_eem_cleanup_script(app_label='cleanup'):
                     'action 2.2 cli command "y"'
                     ]
     results = configurep(eem_commands)
-    # TODO .. check results to make sure they are ALL .. SUCCESS
+    # TODO: .. check results to make sure they are ALL .. SUCCESS
     log_debug(results)
 
 def deploy_eem_upgrade_script(image, app_label='upgrade'):
@@ -188,12 +190,12 @@ def deploy_eem_upgrade_script(image, app_label='upgrade'):
                     'action 2.2 cli command "y"'
                     ]
     results = configurep(eem_commands)
-    # TODO .. check results to make sure they are ALL .. SUCCESS
+    # TODO: .. check results to make sure they are ALL .. SUCCESS
     log_debug(results)
 
 def file_transfer(xfer_mode, xfer_servers, file):
   log_info('Trying to file_transfer(%s, %s, %s)' % (xfer_mode, xfer_servers, file))
-  # TODO have this key off of xfer_mode and build the correct copy for http/https/ftp/tftp/scp/etc
+  # TODO: have this key off of xfer_mode and build the correct copy for http/https/ftp/tftp/scp/etc
   res = cli('copy %s://%s/%s flash:%s' % (xfer_mode, xfer_servers[xfer_mode], file))
   log_debug(res)
 
@@ -248,7 +250,7 @@ def get_file_system():
 def update_config(file, file_system='flash:/'):
     log_info('Trying to update_config(%s)' % (file, file_system))
     update_running_config = 'copy %s%s running-config' % (file_system, file)
-    # TODO  .. neutered for now
+    # TODO:  .. neutered for now
     save_to_startup = '! write memory'
     log_info('Doing %s' % update_running_config)
     running_config = executep(update_running_config)
@@ -256,7 +258,7 @@ def update_config(file, file_system='flash:/'):
     log_info('Doing %s' % save_to_startup)
     startup_config = executep(save_to_startup)
     log_debug(startup_config)
-    # TODO .. run sdiff check of running & startup vs config file
+    # TODO: .. run sdiff check of running & startup vs config file
 
 def upgrade_required(target_version):
     log_info('Trying to upgrade_required(%s)' % target_version)
@@ -288,7 +290,7 @@ def verify_dst_image_md5(image, src_md5, file_system='flash:/'):
     
 def create_logfile():
     log_info('Trying to create_logfile()')
-    #TODO ... pass a list of files to create and just succeed on the first that worked
+    # TODO: ... pass a list of files to create and just succeed on the first that worked
     path_1 = '/flash/guest-share/ztp.log'
     path_2 = '/flash/ztp.log'
     try:

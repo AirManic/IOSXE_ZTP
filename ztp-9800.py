@@ -23,13 +23,14 @@ software_target = "17.09.04a"
 xfer_mode_image = 'http'
 xfer_mode_confg = 'http'
 my_svr = '192.168.201.114'
+my_syslog = '192.168.201.210'
 xfer_servers = {
     'https': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
     'http': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
     'scp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
     'ftp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
     'tftp': {'url': my_svr + '/ztp'},
-    'syslog': [my_svr, '10.85.134.6', '10.85.134.6'],
+    'syslog': [my_syslog, '10.85.134.5', '10.85.134.6'],
     'ntp': ['192.168.201.254'],
 }
 
@@ -58,16 +59,21 @@ software_mappings = {
 
 
 def main():
-    '''
 
-    :return:
-    '''
-
-    # TODO: why do gloval variables not work
+    # TODO: why do global variables not work
     log_tofile = False
 
     try:
         # TODO: configure SYSLOG setting per software_mapping table
+        if 'syslog' in xfer_servers.keys():
+            log_debug('main() adding ZTP syslog servers')
+            for srv in xfer_servers['syslog']:
+                do_configurep('logging host %s' % srv, 'main()')
+        # TODO: configure NTP setting per software_mapping table
+        if 'syslog' in xfer_servers.keys():
+            log_debug('main() adding ZTP ntp servers')
+            for srv in xfer_servers['ntp']:
+                do_configurep('ntp server %s' % srv, 'main()')
 
         # switch to enable/disable persistent logger
         if (log_tofile == False):
@@ -78,9 +84,7 @@ def main():
         log_info('main() START')
 
         # schedule a reload in case something goes wrong
-        schedule_reload = 'reload in %s' % 10
-        log_info('main() Doing %s' % schedule_reload)
-        executep(schedule_reload)
+        do_executep('reload in 10', 'main()')
 
         model = get_model()
         serial = get_serial()
@@ -153,6 +157,8 @@ def main():
         timeout_pause = 120
         log_info('main() Pausing %s seconds for any config changes to settle in' % timeout_pause)
         time.sleep(timeout_pause)
+        # TODO:  .. neutered for now
+        do_executep('! write memory', 'update_config()')
 
         configure('crypto key generate rsa modulus 4096')
         log_info('main() END')
@@ -167,19 +173,14 @@ def main():
 
 def configure_replace(file, file_system='flash:/'):
     log_info('configure_replace(%s, %s)' % (file, file_system))
-    config_command = 'configure replace %s%s force' % (file_system, file)
-    config_repl = executep(config_command)
-    log_debug('configure_replace() ' + config_repl)
+    do_executep('configure replace %s%s force' % (file_system, file), 'configure_replace()')
     # TODO: sdiff to check if changes took effect
 
 
 def configure_merge(file, file_system='flash:/'):
     log_info('configure_merge(%s, %s)' % (file, file_system))
-    config_command = 'copy %s%s running-config' % (file_system, file)
-    config_repl = executep(config_command)
-    log_debug('configure_merge() ' + config_repl)
+    do_executep('copy %s%s running-config' % (file_system, file), 'configure_merge()')
     # TODO: sdiff to check if changes took effect
-
 
 def check_file_exists(file, file_system='flash:/'):
     log_info('check_file_exists(%s, %s)' % (file, file_system))
@@ -288,19 +289,15 @@ def get_model():
     log_info('get_model() found model %s' % model)
     return model
 
+def do_executep(command='', caller=''):
+    log_info('do_executep(%s, %s)' % (command, caller))
+    results = executep(command)
+    log_debug('do_executep(%s, %s) and got results %s' % (command, caller, results))
 
-def update_config(file, file_system='flash:/'):
-    log_info('update_config(%s, %s)' % (file, file_system))
-    update_running_config = 'copy %s%s running-config' % (file_system, file)
-    # TODO:  .. neutered for now
-    save_to_startup = '! write memory'
-    log_info('update_config() Doing %s' % update_running_config)
-    running_config = executep(update_running_config)
-    log_debug('update_config() ' + running_config)
-    log_info('update_config() Doing %s' % save_to_startup)
-    startup_config = executep(save_to_startup)
-    log_debug('update_config() ' + startup_config)
-    # TODO: .. run sdiff check of running & startup vs config file
+def do_configurep(command='', caller=''):
+    log_info('do_configurep(%s, %s)' % (command, caller))
+    results = configurep(command)
+    log_debug('do_configurep(%s, %s) and got results %s' % (command, caller, results))
 
 
 def upgrade_required(target_version):
@@ -380,7 +377,7 @@ def eem_action_syslog(message, priority='6'):
     # trigger a SYSLOG message to the IOS-XE logger
     eem_commands = ['event manager applet eem_action_syslog',
                     'event none maxrun 600',
-                    'action 1.0 syslog priority %s msg \"%s\"' % (priority, message)]
+                    'action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, message, 'ZTP')]
     configurep(eem_commands)
     cli('event manager run eem_action_syslog')
     eem_commands = ['no event manager applet eem_action_syslog']

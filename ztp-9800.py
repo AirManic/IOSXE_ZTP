@@ -3,35 +3,35 @@
 
 # Importing cli module
 from cli import configure, cli, configurep, executep
-import difflib
 import re
 import time
-import urllib
 import sys
 import logging
 import os
 from logging.handlers import RotatingFileHandler
-import subprocess
 
 # disable log_tofile until logger is initialized, so SYSLOG will still function
 log_tofile = False
 
 # set this to trigger code to be upgraded, else empty or False to skip
-software_target = "17.09.04a"
-# TODO: build table to relate serial to software_target, chassis_number, cfg_file
+software_target = '17.09.04a'
 
-xfer_mode_image = 'http'
-xfer_mode_confg = 'http'
 my_svr = '192.168.201.114'
-my_syslog = '192.168.201.210'
-xfer_servers = {
-    'https': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
-    'http': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
-    'scp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
-    'ftp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
-    'tftp': {'url': my_svr + '/ztp'},
-    'syslog': [my_syslog, '10.85.134.5', '10.85.134.6'],
-    'ntp': ['192.168.201.254'],
+serial_number_mapping = {
+    'FCL235100CW': {
+        'software_target': '17.03.04',
+        'chassis_priority': '2',
+        'xfer_mode_image': 'http',
+        'xfer_mode_confg': 'http',
+        'confg-file': 'special.cfg',
+        'xfer_servers': {
+            'https': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+            'http': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+            'scp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+            'ftp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+            'tftp': {'url': my_svr + '/ztp'},
+        },
+    },
 }
 
 # TODO: add SMU and APSP & APDP support
@@ -43,6 +43,16 @@ software_mappings = {
     'C9800-40': { 'software_target': '17.13.01',
         '17.13.01': {'img': 'C9800-40-universalk9_wlc.17.13.01.SPA.bin', 'md5': '35b30f64fca28112ab903733a44acde0'},
         '17.09.04a': {'img': 'C9800-40-universalk9_wlc.17.09.04a.SPA.bin', 'md5': '9d7e3c491ef1903b51b2e4067522a1f8'},
+    },
+    'C9800-L-F-K9': { 'software_target': '17.13.01',
+        '17.13.01': {'img': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin', 'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8'},
+        '17.09.04a': {'img': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin', 'md5': '70d8a8c0009fc862349a200fd62a0244'},
+        '17.03.04': {'img': '', 'md5': 'c92d08d632d23940d03dea0bbf4d5ab5',
+                     'APDP': [{'img': '', 'md5': 'a2147aae88f8d28edee0de55fd14b9a9'}],
+                     'SMU': [{'img': '', 'md5': '2c618030210be637cbcb24fffd33f37c'}],
+                     'APSP': [{'img': '', 'md5': '2d2b9621ebbe7c86b3ac73759ff0652a'},
+                              {'img': '', 'md5': '75e0668eb49e9f370da8005306cd649d'}],
+                     'WEB': [{'bun': 'WLC_WEBAUTH_BUNDLE_1.0.zip', 'md5': 'd9bebd6f10c8b66485a6910eb6113f6c'}], },
     },
     'C9800-L': { 'software_target': '17.13.01',
         '17.13.01': {'img': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin', 'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8'},
@@ -57,26 +67,45 @@ software_mappings = {
     #   'C9800-CL' does not support IOX and guestshell
 }
 
+xfer_mode_image = 'http'
+xfer_mode_confg = 'http'
+my_svr = '192.168.201.114'
+my_syslog = '192.168.201.210'
+xfer_servers = {
+    'https': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+    'http': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+    'scp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+    'ftp': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
+    'tftp': {'url': my_svr + '/ztp'},
+    'syslog': [my_syslog, '10.85.134.5', '10.85.134.6'],
+    'ntp': '192.168.201.254',
+}
 
 def main():
-
-    # TODO: why do global variables not work
-    log_tofile = False
+    global log_tofile
 
     try:
-        # TODO: configure SYSLOG setting per software_mapping table
+        # TODO: configure SYSLOG setting per xfer_servers table
         if 'syslog' in xfer_servers.keys():
             log_debug('main() adding ZTP syslog servers')
-            for srv in xfer_servers['syslog']:
-                do_configurep('logging host %s' % srv, 'main()')
-        # TODO: configure NTP setting per software_mapping table
-        if 'syslog' in xfer_servers.keys():
+            if isinstance(xfer_servers['syslog'], list):
+                for srv in xfer_servers['syslog']:
+                    do_configurep('logging host %s' % srv, 'main()')
+            if isinstance(xfer_servers['syslog'], str):
+                do_configurep('logging host %s' % xfer_servers['syslog'], 'main()')
+            do_configurep('logging trap debugging', 'main()')
+
+        # TODO: configure NTP setting per xfer_servers table
+        if 'ntp' in xfer_servers.keys():
             log_debug('main() adding ZTP ntp servers')
-            for srv in xfer_servers['ntp']:
-                do_configurep('ntp server %s' % srv, 'main()')
+            if isinstance(xfer_servers['ntp'], list):
+                for srv in xfer_servers['ntp']:
+                    do_configurep('ntp server %s' % srv, 'main()')
+            if isinstance(xfer_servers["ntp"], str):
+                do_configurep('ntp server %s' % xfer_servers['ntp'], 'main()')
 
         # switch to enable/disable persistent logger
-        if (log_tofile == False):
+        if log_tofile == False:
             filepath = create_logfile()
             configure_logger(filepath)
             log_tofile = True
@@ -89,27 +118,34 @@ def main():
         model = get_model()
         serial = get_serial()
 
+        # TODO: software_target pecking order .. serial_number_mapping, per model software_mappings, global default
+
         # only check if software_target has been set
-        if software_target:
+        log_info('main() software_target is %s' % software_target)
+
+        if software_target != '':
+
+            update_status = False
+            fetch_model = False
+            fetch_software = False
 
             # TODO: fallback to some global image number ... and avoid abort if no match
             # TODO: look for closet match from table .. eg 9800-L-F-K9 to match 9800-L
             # check to see if we have a sufficient model prefix match
             # .. look for model in software_mappings
-            result = [i for i in software_mappings.keys() if i.startswith(model)]
-            fetch_model = result[0] if len(result) == 1 else False
+            results = [i for i in software_mappings.keys() if i.startswith(model)]
+            log_debug('main() results of startswith(model) is %s' % results)
+            fetch_model = results[0] if len(results) == 1 else False
             log_debug('main() fetch_model is %s' % fetch_model)
 
             if fetch_model:
-                log_info('main() found %s when searching for %s in %s' % (result, model, software_mappings.keys()))
                 # .. look for software_target in model table
                 # TODO: look for serial number specific softfare_target.. else device default, else global default
-                result = [i for i in software_mappings[fetch_model].keys() if i.startswith(software_target)]
-                fetch_software = result[0] if len(result) == 1 else False
+                results = [i for i in software_mappings[fetch_model].keys() if i.startswith(software_target)]
+                fetch_software = results[0] if len(results) == 1 else False
                 if fetch_software:
-                    log_info('main() found %s when searching for %s in %s' % (result, software_target, software_mappings[fetch_model].keys()))
+                    log_info('main() found %s when searching for %s in %s' % (results, software_target, software_mappings[fetch_model].keys()))
 
-            update_status = False
             if fetch_model and fetch_software:
                 software_image = software_mappings[fetch_model][software_target]['img']
                 software_md5_checksum = software_mappings[fetch_model][software_target]['md5']
@@ -121,6 +157,8 @@ def main():
                 # check if image transfer needed
                 if not check_file_exists(software_image):
                     log_info('main() Attempting to transfer image to switch')
+                    # schedule a reload in case something goes wrong
+                    do_executep('reload in 30', 'main()')
                     file_transfer(xfer_mode_image, xfer_servers, software_image)
 
                 # check to see if the file exists now and check MD5
@@ -132,6 +170,8 @@ def main():
                 # TODO: look for INSTALL vs BUNDLE mode from software_mappings table and flip if/where needed
                 deploy_eem_upgrade_script(software_image, 'upgrade')
                 log_info('main() Performing the upgrade - switch will reload')
+                # schedule a reload in case something goes wrong
+                do_executep('reload in 30', 'main()')
                 # ! cli('event manager run upgrade')
                 timeout_pause = 600
                 log_info('main() Pausing %s seconds to let eem script upgrade trigger a reload' % timeout_pause)
@@ -149,6 +189,8 @@ def main():
             else:
                 log_info('main() No upgrade is required')
 
+        # TODO: set chassis priority from serial-number-mapping table
+
         # Download and merge config file
         config_file = '%s-%s.cfg' % (model, serial)
         file_transfer(xfer_mode_confg, xfer_servers, config_file)
@@ -165,7 +207,7 @@ def main():
 
     except Exception as e:
         log_critical('main() Aborting. Failure encountered during day 0 provisioning. Error details below')
-        log_error(e)
+        print(e)
         results = cli('show logging | inc ZTP')
         print(results)
         sys.exit(e)
@@ -385,48 +427,46 @@ def eem_action_syslog(message, priority='6'):
 
 
 def log_debug(message):
-    new_msg = "ZTP DEBUG :: " + message
+    eem_action_syslog(message, '7')
+    new_msg = 'ZTP DEBUG :: ' + message
     print(new_msg)
-    eem_action_syslog(new_msg, '7')
     if log_tofile:
         ztp_log = logging.getLogger('root')
-        ztp_log.info(new_msg)
+        ztp_log.debug(new_msg)
 
 
 def log_info(message):
-    new_msg = "ZTP INFO :: " + message
+    eem_action_syslog(message, '6')
+    new_msg = 'ZTP INFO :: ' + message
     print(new_msg)
-    eem_action_syslog(new_msg, '6')
     if log_tofile:
         ztp_log = logging.getLogger('root')
         ztp_log.info(new_msg)
 
 
 def log_warn(message):
-    new_msg = "ZTP WARN :: " + message
+    eem_action_syslog(message, '4')
+    new_msg = 'ZTP WARNING :: ' + message
     print(new_msg)
-    eem_action_syslog(new_msg, '4')
     if log_tofile:
         ztp_log = logging.getLogger('root')
-        ztp_log.info(new_msg)
-
+        ztp_log.warning(new_msg)
 
 def log_error(message):
-    new_msg = "ZTP ERROR :: " + message
+    eem_action_syslog(message, '3')
+    new_msg = 'ZTP ERROR :: ' + message
     print(new_msg)
-    eem_action_syslog(new_msg, '3')
     if log_tofile:
         ztp_log = logging.getLogger('root')
-        ztp_log.info(new_msg)
-
+        ztp_log.error(new_msg)
 
 def log_critical(message):
-    new_msg = "ZTP CRITICAL :: " + message
+    eem_action_syslog(message, '2')
+    new_msg = 'ZTP CRITICAL :: ' + message
     print(new_msg)
-    eem_action_syslog(new_msg, '2')
     if log_tofile:
         ztp_log = logging.getLogger('root')
-        ztp_log.info(new_msg)
+        ztp_log.critical(new_msg)
 
 
 # TODO fix ztp_log.BLAH lines

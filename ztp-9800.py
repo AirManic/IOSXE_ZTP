@@ -2,7 +2,7 @@
 # TODO: transfrom into a Class construct to make the code more extensible beyond ZTP flow, where main() does not get called if used as import
 
 # Importing cli module
-from cli import configure, cli, configurep, executep
+from cli import cli, clip, configure, configurep, execute, executep
 import re
 import time
 import sys
@@ -21,9 +21,9 @@ serial_number_mapping = {
     'FCL235100CW': {
         'software_target': '17.03.04',
         'chassis_priority': '2',
+        'confg-file': 'special.cfg',
         'xfer_mode_image': 'http',
         'xfer_mode_confg': 'http',
-        'confg-file': 'special.cfg',
         'xfer_servers': {
             'https': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
             'http': {'user': '', 'passwd': '', 'url': my_svr + '/ztp'},
@@ -36,34 +36,44 @@ serial_number_mapping = {
 
 # TODO: add SMU and APSP & APDP support
 software_mappings = {
-    'C9800-80': { 'software_target': '17.13.01',
-        '17.13.01': {'img': 'C9800-80-universalk9_wlc.17.13.01.SPA.bin', 'md5': '35b30f64fca28112ab903733a44acde0'},
-        '17.09.04a': {'img': 'C9800-80-universalk9_wlc.17.09.04a.SPA.bin', 'md5': '9d7e3c491ef1903b51b2e4067522a1f8'},
-    },
-    'C9800-40': { 'software_target': '17.13.01',
-        '17.13.01': {'img': 'C9800-40-universalk9_wlc.17.13.01.SPA.bin', 'md5': '35b30f64fca28112ab903733a44acde0'},
-        '17.09.04a': {'img': 'C9800-40-universalk9_wlc.17.09.04a.SPA.bin', 'md5': '9d7e3c491ef1903b51b2e4067522a1f8'},
-    },
-    'C9800-L-F-K9': { 'software_target': '17.13.01',
-        '17.13.01': {'img': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin', 'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8'},
-        '17.09.04a': {'img': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin', 'md5': '70d8a8c0009fc862349a200fd62a0244'},
-        '17.03.04': {'img': '', 'md5': 'c92d08d632d23940d03dea0bbf4d5ab5',
-                     'APDP': [{'img': '', 'md5': 'a2147aae88f8d28edee0de55fd14b9a9'}],
-                     'SMU': [{'img': '', 'md5': '2c618030210be637cbcb24fffd33f37c'}],
-                     'APSP': [{'img': '', 'md5': '2d2b9621ebbe7c86b3ac73759ff0652a'},
-                              {'img': '', 'md5': '75e0668eb49e9f370da8005306cd649d'}],
-                     'WEB': [{'bun': 'WLC_WEBAUTH_BUNDLE_1.0.zip', 'md5': 'd9bebd6f10c8b66485a6910eb6113f6c'}], },
-    },
-    'C9800-L': { 'software_target': '17.13.01',
-        '17.13.01': {'img': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin', 'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8'},
-        '17.09.04a': {'img': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin', 'md5': '70d8a8c0009fc862349a200fd62a0244'},
-        '17.03.04': {'img': '', 'md5': 'c92d08d632d23940d03dea0bbf4d5ab5',
-                     'APDP': [{'img': '', 'md5': 'a2147aae88f8d28edee0de55fd14b9a9'}],
-                     'SMU': [{'img': '', 'md5': '2c618030210be637cbcb24fffd33f37c'}],
-                     'APSP': [{'img': '', 'md5': '2d2b9621ebbe7c86b3ac73759ff0652a'},
-                              {'img': '', 'md5': '75e0668eb49e9f370da8005306cd649d'}],
-                     'WEB': [{'bun': 'WLC_WEBAUTH_BUNDLE_1.0.zip', 'md5': 'd9bebd6f10c8b66485a6910eb6113f6c'}], },
-    },
+    'C9800-80': {'software_target': '17.13.01',
+                 '17.13.01': {'img': 'C9800-80-universalk9_wlc.17.13.01.SPA.bin',
+                              'md5': '35b30f64fca28112ab903733a44acde0'},
+                 '17.09.04a': {'img': 'C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
+                               'md5': '9d7e3c491ef1903b51b2e4067522a1f8'},
+                 },
+    'C9800-40': {'software_target': '17.13.01',
+                 '17.13.01': {'img': 'C9800-40-universalk9_wlc.17.13.01.SPA.bin',
+                              'md5': '35b30f64fca28112ab903733a44acde0'},
+                 '17.09.04a': {'img': 'C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
+                               'md5': '9d7e3c491ef1903b51b2e4067522a1f8'},
+                 },
+    'C9800-X-F-K9': {'software_target': '17.13.01',
+                     '17.13.01': {'img': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                                  'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8'},
+                     '17.09.04a': {'img': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                                   'md5': '70d8a8c0009fc862349a200fd62a0244'},
+                     '17.03.04': {'img': '', 'md5': 'c92d08d632d23940d03dea0bbf4d5ab5',
+                                  'APDP': [{'img': '', 'md5': 'a2147aae88f8d28edee0de55fd14b9a9'}],
+                                  'SMU': [{'img': '', 'md5': '2c618030210be637cbcb24fffd33f37c'}],
+                                  'APSP': [{'img': '', 'md5': '2d2b9621ebbe7c86b3ac73759ff0652a'},
+                                           {'img': '', 'md5': '75e0668eb49e9f370da8005306cd649d'}],
+                                  'WEB': [{'bun': 'WLC_WEBAUTH_BUNDLE_1.0.zip',
+                                           'md5': 'd9bebd6f10c8b66485a6910eb6113f6c'}], },
+                     },
+    'C9800-L': {'software_target': '17.13.01',
+                '17.13.01': {'img': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                             'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8'},
+                '17.09.04a': {'img': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                              'md5': '70d8a8c0009fc862349a200fd62a0244'},
+                '17.03.04': {'img': '', 'md5': 'c92d08d632d23940d03dea0bbf4d5ab5',
+                             'APDP': [{'img': '', 'md5': 'a2147aae88f8d28edee0de55fd14b9a9'}],
+                             'SMU': [{'img': '', 'md5': '2c618030210be637cbcb24fffd33f37c'}],
+                             'APSP': [{'img': '', 'md5': '2d2b9621ebbe7c86b3ac73759ff0652a'},
+                                      {'img': '', 'md5': '75e0668eb49e9f370da8005306cd649d'}],
+                             'WEB': [
+                                 {'bun': 'WLC_WEBAUTH_BUNDLE_1.0.zip', 'md5': 'd9bebd6f10c8b66485a6910eb6113f6c'}], },
+                },
     #   'C9800-CL' does not support IOX and guestshell
 }
 
@@ -81,28 +91,29 @@ xfer_servers = {
     'ntp': '192.168.201.254',
 }
 
+
 def main():
+    # need to update the _global_ log_tofile to influence other aspects like log_BLAH()
     global log_tofile
 
     try:
-        # TODO: configure SYSLOG setting per xfer_servers table
+
         if 'syslog' in xfer_servers.keys():
             log_debug('main() adding ZTP syslog servers')
             if isinstance(xfer_servers['syslog'], list):
                 for srv in xfer_servers['syslog']:
-                    do_configurep('logging host %s' % srv, 'main()')
+                    do_configure('logging host %s' % srv, 'main()')
             if isinstance(xfer_servers['syslog'], str):
-                do_configurep('logging host %s' % xfer_servers['syslog'], 'main()')
-            do_configurep('logging trap debugging', 'main()')
+                do_configure('logging host %s' % xfer_servers['syslog'], 'main()')
+            do_configure('logging trap debugging', 'main()')
 
-        # TODO: configure NTP setting per xfer_servers table
         if 'ntp' in xfer_servers.keys():
             log_debug('main() adding ZTP ntp servers')
             if isinstance(xfer_servers['ntp'], list):
                 for srv in xfer_servers['ntp']:
-                    do_configurep('ntp server %s' % srv, 'main()')
+                    do_configure('ntp server %s' % srv, 'main()')
             if isinstance(xfer_servers["ntp"], str):
-                do_configurep('ntp server %s' % xfer_servers['ntp'], 'main()')
+                do_configure('ntp server %s' % xfer_servers['ntp'], 'main()')
 
         # switch to enable/disable persistent logger
         if log_tofile == False:
@@ -113,7 +124,7 @@ def main():
         log_info('main() START')
 
         # schedule a reload in case something goes wrong
-        do_executep('reload in 10', 'main()')
+        do_cli('reload in 10', 'main()')
 
         model = get_model()
         serial = get_serial()
@@ -126,31 +137,30 @@ def main():
         if software_target != '':
 
             update_status = False
-            fetch_model = False
-            fetch_software = False
+            fetch_software = ''
 
             # TODO: fallback to some global image number ... and avoid abort if no match
             # TODO: look for closet match from table .. eg 9800-L-F-K9 to match 9800-L
             # check to see if we have a sufficient model prefix match
-            # .. look for model in software_mappings
-            results = [i for i in software_mappings.keys() if i.startswith(model)]
+            # .. look for model with the longest starts with match in software_mappings
+            results = [i for i in software_mappings.keys() if model.startswith(i)]
             log_debug('main() results of startswith(model) is %s' % results)
-            fetch_model = results[0] if len(results) == 1 else False
+            fetch_model = max(results, key=len)
             log_debug('main() fetch_model is %s' % fetch_model)
 
-            if fetch_model:
+            if fetch_model != '':
                 # .. look for software_target in model table
-                # TODO: look for serial number specific softfare_target.. else device default, else global default
-                results = [i for i in software_mappings[fetch_model].keys() if i.startswith(software_target)]
-                fetch_software = results[0] if len(results) == 1 else False
+                # TODO: look for serial number specific software_target.. else device default, else global default
+                results = [i for i in software_mappings[fetch_model].keys() if i == software_target]
+                fetch_software = results[0] if len(results) == 1 else ''
                 if fetch_software:
                     log_info('main() found %s when searching for %s in %s' % (results, software_target, software_mappings[fetch_model].keys()))
 
-            if fetch_model and fetch_software:
-                software_image = software_mappings[fetch_model][software_target]['img']
-                software_md5_checksum = software_mappings[fetch_model][software_target]['md5']
-                log_info('main() Target image is %s with md5 %s' % (software_image, software_md5_checksum))
-                update_status, current_version = upgrade_required(software_target)
+            if fetch_model != '' and fetch_software != '':
+                software_image = software_mappings[fetch_model][fetch_software]['img']
+                software_md5_checksum = software_mappings[fetch_model][fetch_software]['md5']
+                log_info('main() Target image is %s with md5 %s' % (fetch_software, software_md5_checksum))
+                update_status, current_version = upgrade_required(fetch_software)
                 log_info('main() Current version is %s' % current_version)
 
             if update_status:
@@ -158,7 +168,7 @@ def main():
                 if not check_file_exists(software_image):
                     log_info('main() Attempting to transfer image to switch')
                     # schedule a reload in case something goes wrong
-                    do_executep('reload in 30', 'main()')
+                    do_cli('reload in 30', 'main()')
                     file_transfer(xfer_mode_image, xfer_servers, software_image)
 
                 # check to see if the file exists now and check MD5
@@ -171,17 +181,16 @@ def main():
                 deploy_eem_upgrade_script(software_image, 'upgrade')
                 log_info('main() Performing the upgrade - switch will reload')
                 # schedule a reload in case something goes wrong
-                do_executep('reload in 30', 'main()')
-                # ! cli('event manager run upgrade')
-                timeout_pause = 600
+                do_cli('reload in 90', 'main()')
+                do_cli('event manager run upgrade', 'main()')
+                timeout_pause = 3600
                 log_info('main() Pausing %s seconds to let eem script upgrade trigger a reload' % timeout_pause)
                 time.sleep(timeout_pause)
-                log_info(
-                    'main() EEM upgrade took more than %s seconds to reload the device. Increase the sleep time by few minutes before retrying' % timeout_upgrade)
+                log_info('main() EEM upgrade took more than %s seconds to reload the device. Increase the sleep time by few minutes before retrying' % timeout_upgrade)
 
                 # Only do cleanup .. if actually did an upgrade in case someone is doing these steps manually and wnat to keep inactive around
                 deploy_eem_cleanup_script('cleanup')
-                cli('event manager run cleanup')
+                do_cli('event manager run cleanup', 'main()')
                 timeout_pause = 30
                 log_info('main() Pausing %s seconds for any config changes to settle in' % timeout_pause)
                 time.sleep(timeout_pause)
@@ -200,34 +209,35 @@ def main():
         log_info('main() Pausing %s seconds for any config changes to settle in' % timeout_pause)
         time.sleep(timeout_pause)
         # TODO:  .. neutered for now
-        do_executep('! write memory', 'update_config()')
+        do_cli('! write memory', 'update_config()')
 
-        configure('crypto key generate rsa modulus 4096')
+        do_configure('crypto key generate rsa modulus 4096', 'main()')
         log_info('main() END')
 
     except Exception as e:
         log_critical('main() Aborting. Failure encountered during day 0 provisioning. Error details below')
+        log_debug('main() An error occurred: %s' % type(e).__name__)
         print(e)
-        results = cli('show logging | inc ZTP')
-        print(results)
+        cli('show logging | inc ZTP')
         sys.exit(e)
 
 
 def configure_replace(file, file_system='flash:/'):
     log_info('configure_replace(%s, %s)' % (file, file_system))
-    do_executep('configure replace %s%s force' % (file_system, file), 'configure_replace()')
+    do_cli('configure replace %s%s force' % (file_system, file), 'configure_replace()')
     # TODO: sdiff to check if changes took effect
 
 
 def configure_merge(file, file_system='flash:/'):
     log_info('configure_merge(%s, %s)' % (file, file_system))
-    do_executep('copy %s%s running-config' % (file_system, file), 'configure_merge()')
+    do_cli('copy %s%s running-config' % (file_system, file), 'configure_merge()')
     # TODO: sdiff to check if changes took effect
+
 
 def check_file_exists(file, file_system='flash:/'):
     log_info('check_file_exists(%s, %s)' % (file, file_system))
     dir_check = 'dir ' + file_system + file
-    results = cli(dir_check)
+    results = do_cli(dir_check, 'check_file_exists()')
     if 'No such file or directory' in results:
         log_warn('check_file_exists() %s does NOT exist on %s' % (file, file_system))
         return False
@@ -257,8 +267,7 @@ def deploy_eem_cleanup_script(app_label='cleanup'):
                     'action 2.1 cli command "y" pattern "proceed"',
                     'action 2.2 cli command "y"'
                     ]
-    results = configurep(eem_commands)
-    log_debug('deploy_eem_cleanup_script() ' + results)
+    do_configure(eem_commands, 'deploy_eem_cleanup_script()')
 
 
 def deploy_eem_upgrade_script(image, app_label='upgrade'):
@@ -271,39 +280,36 @@ def deploy_eem_upgrade_script(image, app_label='upgrade'):
                     'action 2.1 cli command "n" pattern "proceed"',
                     'action 2.2 cli command "y"'
                     ]
-    results = configurep(eem_commands)
-    log_debug('deploy_eem_upgrade_script() ' + results)
+    do_configure(eem_commands, 'deploy_eem_upgrade_script()')
 
 
 def file_transfer(xfer_mode, xfer_servers, file):
     log_info('file_transfer(%s, %s, %s)' % (xfer_mode, xfer_servers, file))
     # TODO: have this key off of xfer_mode and build the correct copy for http/https/ftp/tftp/scp/etc based on if user/pass
     command = 'copy %s://%s/%s flash:%s' % (xfer_mode, xfer_servers[xfer_mode]['url'], file, file)
-    log_debug('file_transfer() ' + command)
-    results = cli(command)
-    log_debug('file_transfer() ' + results)
+    do_cli(command, 'file_transfer()')
 
 
 def find_certs():
     log_info('find_certs()')
-    certs = cli('show run | include crypto pki')
+    certs = do_cli('show run | include crypto pki', 'find_certs()')
     if certs:
         certs_split = certs.splitlines()
         certs_split.remove('')
         for cert in certs_split:
             command = 'no %s' % (cert)
-            configure(command)
+            do_configure(command, 'find_certs()')
 
 
 def get_serial():
     log_info('get_serial()')
     try:
-        show_version = cli('show version')
+        show_version = do_cli('show version', 'get_serial()')
     except Exception as e:
         timeout_pause = 90
         log_info('get_serial() Pause %s seconds .. and Retry to get_serial()' % timeout_pause)
         time.sleep(timeout_pause)
-        show_version = cli('show version')
+        show_version = do_cli('show version', 'get_serial()')
     try:
         serial = re.search(r"System Serial Number\s+:\s+(\S+)", show_version).group(1)
     except AttributeError:
@@ -315,12 +321,12 @@ def get_serial():
 def get_model():
     log_info('get_model()')
     try:
-        show_version = cli('show version')
+        show_version = do_cli('show version', 'get_model()')
     except Exception as e:
         timeout_pause = 90
         log_info('get_model() Pause %s seconds .. and Retry to get_model()' % timeout_pause)
         time.sleep(timeout_pause)
-        show_version = cli('show version')
+        show_version = do_cli('show version', 'get_model()')
     model = re.search(r"Model Number\s+:\s+(\S+)", show_version)
     if model != None:
         model = model.group(1)
@@ -331,23 +337,41 @@ def get_model():
     log_info('get_model() found model %s' % model)
     return model
 
-def do_executep(command='', caller=''):
-    log_info('do_executep(%s, %s)' % (command, caller))
-    results = executep(command)
-    log_debug('do_executep(%s, %s) and got results %s' % (command, caller, results))
 
-def do_configurep(command='', caller=''):
-    log_info('do_configurep(%s, %s)' % (command, caller))
-    results = configurep(command)
-    log_debug('do_configurep(%s, %s) and got results %s' % (command, caller, results))
+def do_cli(command='', caller=''):
+    log_info('do_cli(%s, %s)' % (command, caller))
+    results = ''
+    try:
+        results = cli(command)
+    except Exception as e:
+        log_debug('do_cli() An error occurred: %s' % type(e).__name__)
+        print(e)
+    # TODO: To Be .. or Not To Be .. should this be kept here
+    # print(results)
+    # TODO: triggers exception
+    # log_debug('do_cli(%s, %s) and got results %s' % (command, caller, results))
+    return results
+
+
+def do_configure(command='', caller=''):
+    log_info('do_configure(%s, %s)' % (command, caller))
+    results = ''
+    try:
+        results = configure(command)
+    except Exception as e:
+        log_debug('do_cli() An error occurred: %s' % type(e).__name__)
+        print(e)
+    # TODO: triggers exception
+    # print(results)
+    # log_debug('do_configure(%s, %s) and got results %s' % (command, caller, results))
+    return results
 
 
 def upgrade_required(target_version):
     log_info('upgrade_required(%s)' % target_version)
-    sh_version = cli('show version')
+    sh_version = do_cli('show version', 'upgrade_required()')
     current_version = re.search(r"Cisco IOS XE Software, Version\s+(\S+)", sh_version).group(1)
-    log_info('upgrade_required() Current Code Version is %s and Target Code Version is %s' % (
-        current_version, target_version))
+    log_info('upgrade_required() Current Code Version is %s and Target Code Version is %s' % (current_version, target_version))
     if (target_version == current_version):
         return False, current_version
     else:
@@ -359,8 +383,9 @@ def verify_dst_image_md5(image, src_md5, file_system='flash:/'):
     verify_md5 = 'verify /md5 ' + file_system + image
     log_info('verify_dst_image_md5() Verifying MD5 for %s' % verify_md5)
     try:
-        dst_md5 = cli(verify_md5)
-        log_debug('verify_dst_image_md5() ' + dst_md5)
+        dst_md5 = do_cli(verify_md5, 'verify_dst_image_md5()')
+        # TODO dst_md5 output is too long for log_BLAH call
+        # log_debug('verify_dst_image_md5() src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
         if src_md5 in dst_md5:
             log_info('verify_dst_image_md5() MD5 hashes match')
             return True
@@ -369,7 +394,7 @@ def verify_dst_image_md5(image, src_md5, file_system='flash:/'):
             return False
     except Exception as e:
         log_error('verify_dst_image_md5() MD5 checksum failed due to an exception')
-        log_critical(e)
+        print(e)
         return False
 
 
@@ -414,18 +439,6 @@ def configure_logger(path):
     ztp_log.addHandler(log_handler)
 
 
-# SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
-def eem_action_syslog(message, priority='6'):
-    # trigger a SYSLOG message to the IOS-XE logger
-    eem_commands = ['event manager applet eem_action_syslog',
-                    'event none maxrun 600',
-                    'action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, message, 'ZTP')]
-    configurep(eem_commands)
-    cli('event manager run eem_action_syslog')
-    eem_commands = ['no event manager applet eem_action_syslog']
-    configurep(eem_commands)
-
-
 def log_debug(message):
     eem_action_syslog(message, '7')
     new_msg = 'ZTP DEBUG :: ' + message
@@ -452,6 +465,7 @@ def log_warn(message):
         ztp_log = logging.getLogger('root')
         ztp_log.warning(new_msg)
 
+
 def log_error(message):
     eem_action_syslog(message, '3')
     new_msg = 'ZTP ERROR :: ' + message
@@ -459,6 +473,7 @@ def log_error(message):
     if log_tofile:
         ztp_log = logging.getLogger('root')
         ztp_log.error(new_msg)
+
 
 def log_critical(message):
     eem_action_syslog(message, '2')
@@ -469,7 +484,23 @@ def log_critical(message):
         ztp_log.critical(new_msg)
 
 
-# TODO fix ztp_log.BLAH lines
+# SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
+def eem_action_syslog(message, priority='6'):
+    # trigger a SYSLOG message to the IOS-XE logger
+    # TODO: need to transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
+    new_msg = message.replace('"', '~')
+    new_msg = new_msg.replace("'", "~")
+    eem_commands = ['event manager applet eem_action_syslog',
+                    'event none maxrun 600',
+                    'action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, new_msg, 'ZTP')]
+    # do not call do_configure().. call configure() directly .. otherwise will get loop
+    configure(eem_commands)
+    # do not call do_cli().. call cli() directly .. otherwise will get loop
+    cli('event manager run eem_action_syslog', 'eem_action_syslog()')
+    eem_commands = ['no event manager applet eem_action_syslog']
+    # do not call do_configure().. call configure() directly .. otherwise will get loop
+    configure(eem_commands)
+
 
 if __name__ == "__main__":
     main()

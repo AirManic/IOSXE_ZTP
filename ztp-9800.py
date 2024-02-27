@@ -107,7 +107,6 @@ def main():
 
         # TODO: add SMU and APSP & APDP support
 
-        # TODO: set chassis priority from serial-number-mapping table
         if self.current_chassis.chassis_priority != self.target_chassis.chassis_priority:
             self.change_chassis_priority()
         if self.current_chassis.chassis_number != self.target_chassis.chassis_number:
@@ -532,12 +531,6 @@ class IOSXEDevice(object):
         # TODO: look for leading & trailing '/' and remove
         command = command + '/' + filename
         command = command + ' flash:' + filename
-
-        self.ztp_log.info(' new command is %s ' % command)
-
-        command = ('copy %s://%s/%s/%s flash:%s' %
-                   (transferit.xfer_mode, transferit.hostname, transferit.path, transferit.filename,
-                    transferit.filename))
         self.do_cli(command)
         self.ztp_log.info('returning %s' % transferit)
         return transferit
@@ -616,51 +609,6 @@ class IOSXEDevice(object):
             self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
             return False
 
-    def configure_logger(self):
-        self.ztp_log = logging.getLogger('ZTP')
-        self.ztp_log.setLevel(logging.DEBUG)
-
-        def do_guestshell_syslog(record):
-            # TODO .. fix this
-            #    with open('/dev/ttyS2', os.O_WRONLY) as fd:
-            #        fd.write(record.getMessage())
-            return True
-
-        # TODO: trigger a SYSLOG message as well
-        self.ztp_log.addFilter(do_guestshell_syslog)
-
-        # Create sys.stdout Stream handler
-        handler = logging.StreamHandler()
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(
-            logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s()@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-
-        # Create SysLogHandler handler
-        handler = logging.handlers.SysLogHandler()
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s()@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-
-        '''
-        # Create SysLogHandler handler
-        # TODO: use native guestshell SYSLOG feature
-        handler = logging.StreamHandler('/dev/ttyS2')
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter('[a123b234,1,7]%(asctime)s: %(levelname)s: %(funcName)s()@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-    
-        # create a new file > 5 mb size
-        handler = logging.handlers.RotatingFileHandler(filename='flash/guest-share/ztp.log', 
-                                                       mode='a', maxBytes=5 * 1024 * 1024, 
-                                                       backupCount=10, encoding=None, delay=0)
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s()@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-        '''
-
-        return self.ztp_log
-
     def fetch_default_xfer_servers(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: fetch these things from an ini file from the server
@@ -691,12 +639,68 @@ class IOSXEDevice(object):
                 if isinstance(srv.hostname, list):
                     for i in srv.hostname: self.do_configure('ntp server %s' % i)
 
+    def configure_logger(self):
+        self.ztp_log = logging.getLogger('ZTP')
+        self.ztp_log.setLevel(logging.DEBUG)
+
+        def do_guestshell_syslog(record):
+            # TODO .. see if this can be fixed
+            # with open('/dev/ttyS3', 'w') as fd:
+            #   fd.write(record.getMessage())
+            # os.system('echo %s > /dev/ttyS3' % record.getMessage())
+            try:
+                syslog_priority = '5'
+                if record.levelname == 'DEBUG': syslog_priority = '7'
+                if record.levelname == 'INFO': syslog_priority = '6'
+                if record.levelname == 'WARNING': syslog_priority = '4'
+                if record.levelname == 'ERROR': syslog_priority = '3'
+                if record.levelname == 'CRITICAL': syslog_priority = '2'
+                self.eem_action_syslog('%s@%s: %s' % (record.funcName, record.lineno, record.msg),
+                                       priority=syslog_priority)
+            except Exception as e:
+                print('An error occurred: %s' % type(e).__name__)
+                print(e)
+            return True
+
+        # trigger a SYSLOG message as well
+        self.ztp_log.addFilter(do_guestshell_syslog)
+
+        # Create sys.stdout Stream handler
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(
+            logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
+        self.ztp_log.addHandler(handler)
+
+        # TODO .. see if this can be fixed
+        '''
+        # Create SysLogHandler handler
+        handler = logging.handlers.SysLogHandler()
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
+        self.ztp_log.addHandler(handler)
+        '''
+
+        # TODO .. see if this can be fixed
+        '''
+        # create a new file > 5 mb size
+        handler = logging.handlers.RotatingFileHandler(filename='flash/guest-share/ztp.log',
+                                                       mode='a', maxBytes=5 * 1024 * 1024,
+                                                       backupCount=10, encoding=None, delay=0)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
+        self.ztp_log.addHandler(handler)
+        '''
+
+        return self.ztp_log
+
     # SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
     def eem_action_syslog(self, message, priority='6'):
         # trigger a SYSLOG message to the IOS-XE logger
-        # TODO: need to transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
+        # transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
         new_msg = message.replace('"', '~')
         new_msg = new_msg.replace("'", "~")
+        new_msg = new_msg.replace("\n", "; ")
         eem_commands = ['event manager applet eem_action_syslog',
                         'event none maxrun 600',
                         'action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, new_msg, 'ZTP')]

@@ -270,7 +270,7 @@ class IOSXEDevice(object):
         # start with same place the script came from
         transferit = self.ztp_script
         # change the filename to the seed.yml file
-        transferit.filename = '%s-seed.yml' % self.serial
+        transferit.filename = 'ztp-seed-%s.yml' % self.serial
         self.ztp_log.info('returning %s' % transferit)
         return transferit
 

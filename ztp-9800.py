@@ -636,13 +636,13 @@ class IOSXEDevice(object):
             logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s()@%(lineno)d: %(message)s'))
         self.ztp_log.addHandler(handler)
 
-        '''
         # Create SysLogHandler handler
-        handler = logging.handlers.SysLogHandler(address=('192.168.201.210', 514))
+        handler = logging.handlers.SysLogHandler()
         handler.setLevel(logging.DEBUG)
         handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s()@%(lineno)d: %(message)s'))
         self.ztp_log.addHandler(handler)
-        
+
+        '''
         # Create SysLogHandler handler
         # TODO: use native guestshell SYSLOG feature
         handler = logging.StreamHandler('/dev/ttyS2')

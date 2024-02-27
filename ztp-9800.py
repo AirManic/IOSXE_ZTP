@@ -1,7 +1,6 @@
 # TODO: docstrings .. top and functions TODO: transfrom into a Class construct to make the code more extensible
 #  beyond ZTP flow, where main() does not get called if used as import
 
-import pkgutil
 # Importing cli module
 from cli import cli, clip, configure, configurep, execute, executep
 import re
@@ -29,9 +28,6 @@ def main():
 
         # schedule a reload in case something goes wrong
         self.do_cli('reload in 5')
-
-        # config_basic_access() so can SSH to the DHCP address assigned
-        self.configure_basic_access()
 
         if self.software_target is not None:
 
@@ -153,7 +149,6 @@ class TransferInfo(object):
         self.md5 = md5
 
     def __str__(self):
-        # TODO: expand for printing
         return 'xfer_mode=%s username=%s password=%s hostname=%s port=%s path=%s filename=%s md5=%s' % (
             self.xfer_mode, self.username, self.password, self.hostname, self.port, self.path, self.filename, self.md5)
 
@@ -172,6 +167,8 @@ class IOSXEDevice(object):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # schedule a reload in case something goes wrong
         self.do_cli('reload in 15')
+        # config_basic_access() so can SSH to the DHCP address assigned
+        self.configure_basic_access()
 
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
@@ -627,7 +624,6 @@ class IOSXEDevice(object):
             # TODO .. fix this
             #    with open('/dev/ttyS2', os.O_WRONLY) as fd:
             #        fd.write(record.getMessage())
-            self.eem_action_syslog(record.getMessage())
             return True
 
         # TODO: trigger a SYSLOG message as well
@@ -671,11 +667,11 @@ class IOSXEDevice(object):
         xfer_servers = [
             TransferInfo(xfer_mode='syslog', hostname='192.168.201.210'),
             TransferInfo(xfer_mode='ntp', hostname='192.168.201.254'),
-            TransferInfo(xfer_mode='https', hostname='192.168.201.114', path='/ztp'),
-            TransferInfo(xfer_mode='http', hostname='192.168.201.114', path='/ztp'),
-            TransferInfo(xfer_mode='scp', hostname='192.168.201.114', path='/ztp'),
-            TransferInfo(xfer_mode='ftp', hostname='192.168.201.114', path='/ztp'),
-            TransferInfo(xfer_mode='tftp', hostname='192.168.201.114', path='/ztp'),
+            TransferInfo(xfer_mode='https', hostname='192.168.201.114', path='ztp'),
+            TransferInfo(xfer_mode='http', hostname='192.168.201.114', path='ztp'),
+            TransferInfo(xfer_mode='scp', hostname='192.168.201.114', path='ztp'),
+            TransferInfo(xfer_mode='ftp', hostname='192.168.201.114', path='ztp'),
+            TransferInfo(xfer_mode='tftp', hostname='192.168.201.114', path='ztp'),
         ]
         self.ztp_log.info('returning xfer_servers %s' % xfer_servers)
         return xfer_servers

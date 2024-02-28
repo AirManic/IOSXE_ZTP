@@ -3,6 +3,7 @@
 
 # Importing cli module
 from cli import cli, clip, configure, configurep, execute, executep
+import json
 import re
 from collections import namedtuple
 import time
@@ -23,14 +24,169 @@ def main():
         # calling it "self".. so it sort of looks and acts a lot like the Class behavior
         self = IOSXEDevice()
 
+        # =============================================================================================================
+
+        # schedule a reload in case something goes wrong
+        self.do_cli('reload in 5')
+
+        # TODO: testing
+        self.ztp_log.info('marker0')
+        print(json.dumps(self.basic_access_commands))
+
+        # TODO: testing
+        self.ztp_log.info('json.dumps(self.software_mappings)')
+        print(json.dumps(self.software_mappings))
+
+        self.ztp_log.info('json.dumps(self)')
+        print(json.dumps(self))
+
+        self.ztp_log.info('tst_software_mappings')
+        tst_software_mappings = {
+            'C9800-80': {
+                'software_target': '17.13.01',
+                'software_table': {
+                    '17,13.01': {
+                        'img': {
+                            'filename': 'C9800-80-universalk9_wlc.17.13.01.SPA.bin',
+                            'md5': '35b30f64fca28112ab903733a44acde0',
+                        },
+                    },
+                    '17.09.04a': {
+                        'img': {
+                            'filename': 'C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
+                            'md5': '9d7e3c491ef1903b51b2e4067522a1f8',
+                        },
+                    },
+                },
+            },
+            'C9800-40': {
+                'software_target': '17.13.01',
+                'software_table': {
+                    '17.13.01': {
+                        'img': {
+                            'filename': '9800-40-universalk9_wlc.17.13.01.SPA.bin',
+                            'md5': '35b30f64fca28112ab903733a44acde0',
+                        },
+                    },
+                    '17.09.04a': {
+                        'img': {
+                            'filename': 'C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
+                            'md5': '9d7e3c491ef1903b51b2e4067522a1f8',
+                        },
+                    },
+                },
+            },
+            'C9800-L': {
+                'software_target': '17.13.01',
+                'software_table': {
+                    '17.13.01': {
+                        'img': {
+                            'filename': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                            'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8',
+                        },
+                    },
+                    '17.09.04a': {
+                        'img': {
+                            'filename': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                            'md5': '70d8a8c0009fc862349a200fd62a0244',
+                        },
+                    },
+                    '17.03.04': {
+                        'img': {
+                        },
+                        'APDP': {
+                            'filename': '',
+                            'md5': '',
+                        },
+                        'SMU': {
+                            'filename': '',
+                            'md5': '',
+                        },
+                        'APSP': [
+                            {
+                                'filename': '',
+                                'md5': '',
+                            },
+                        ],
+                        'WEB': {
+                            'filename': 'WLC_WEBAUTH_BUNDLE_1.0.zip',
+                            'md5': 'd9bebd6f10c8b66485a6910eb6113f6c',
+                        },
+                    },
+                },
+            },
+            'C9800-L-C-K9': {
+                'software_target': '17.13.01',
+                'software_table': {
+                    '17.13.01': {
+                        'img': {
+                            'filename': 'C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                            'md5': 'c425f5ae2ceb71db330e8dbc17edc3a8',
+                        },
+                    },
+                    '17.09.04a': {
+                        'img': {
+                            'filename': 'C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                            'md5': '70d8a8c0009fc862349a200fd62a0244',
+                        },
+                    },
+                    '17.03.04': {
+                        'img': {
+                            'filename': 'C9800-L-universalk9_wlc.17.03.04.SPA.bin',
+                            'md5': 'c92d08d632d23940d03dea0bbf4d5ab5',
+                        },
+                        'APDP': {
+                            'filename': '',
+                            'md5': '',
+                        },
+                        'SMU': {
+                            'filename': '',
+                            'md5': '',
+                        },
+                        'APSP': [
+                            {
+                                'filename': '',
+                                'md5': '',
+                            },
+                            {
+                                'filename': '',
+                                'md5': '',
+                            },
+                        ],
+                        'WEB': {},
+                    },
+                },
+            },
+            'C9800-CL': {
+                # does not support IOX and guestshell
+                'software_target': None,
+            },
+        }
+
+        self.ztp_log.info('json.dumps(tst_software_mappings) raw')
+        print(json.dumps(tst_software_mappings))
+
+        # convert any existing item under the version table from dict to TransferTuple
+        for model in tst_software_mappings:
+            for version in model['software_table']:
+                if type(version['img'], dict):
+                    version['img'] = IOSXEDevice.TransferInfo_tuple(**version['img'])
+
+        self.ztp_log.info('json.dumps(tst_software_mappings) converted')
+        print(json.dumps(tst_software_mappings))
+
+        # =============================================================================================================
+
         self.ztp_log.info('START')
         self.ztp_log.debug('This device is model % and serial %s' % (self.model, self.serial))
+
+        # config_basic_access() so can SSH to the DHCP address assigned
+        self.configure_basic_access()
 
         # schedule a reload in case something goes wrong
         self.do_cli('reload in 5')
 
         if self.software_target is not None:
-
             # check to see if we have a sufficient model prefix match
             # .. look for model with the longest starts with match in software_mappings
             results = [i for i in self.software_mappings.keys() if self.model.startswith(i)]
@@ -38,46 +194,43 @@ def main():
             self._fetch_model = max(results, key=len)
             self.ztp_log.debug('_fetch_model is %s' % self._fetch_model)
 
-            # TODO: move into class logic
-            self._fetch_software = None
-            if self._fetch_model is not None:
-                # .. look for software_target in model table
-                results = [i for i in self.software_mappings[self._fetch_model].keys() if
-                           i == self.software_target]
-                self._fetch_software = results[0] if len(results) == 1 else ''
-                self.software_target = self._fetch_software
-                if self._fetch_software:
-                    self.ztp_log.info('found %s when searching for %s in %s' % (
-                        results, self.software_target,
-                        self.software_mappings[self._fetch_model].keys()))
+        # TODO: move into class logic
+        self._fetch_software = None
+        if self._fetch_model is not None:
+        # .. look for software_target in model table
+            results = [i for i in self.software_mappings[self._fetch_model].keys() if
+                i == self.software_target]
+            self._fetch_software = results[0] if len(results) == 1 else ''
+            if self._fetch_software is not None:
+                self.ztp_log.info('found %s when searching for %s in %s' % (
+                    results, self.software_target,
+                    self.software_mappings[self._fetch_model].keys()))
 
-            # TODO: move into class logic
-            if self._fetch_model is not None and self._fetch_software is not None:
-                self._software_image = \
-                    self.software_mappings[self._fetch_model][self._fetch_software]['img']
-                self._software_md5 = \
-                    self.software_mappings[self._fetch_model][self._fetch_software]['md5']
-                self.ztp_log.info(
-                    'target image is %s with md5 %s' % (self._fetch_software, self._software_md5))
-                self.ztp_log.info('current version is %s' % self.current_version)
+        # TODO: move into class logic
+        if self._fetch_model is not None and self._fetch_software is not None:
+            self._software_image = \
+                self.software_mappings[self._fetch_model][self._fetch_software][img]
+        self._software_md5 = \
+            self.software_mappings[self._fetch_model][self._fetch_software]['md5']
+        self.ztp_log.info('target image is %s with md5 %s' % (self._fetch_software, self._software_md5))
+        self.ztp_log.info('current version is %s' % self.current_version)
 
-            # TODO: code for Class construct
-            if self.upgrade_required and False:
-                # check if image transfer needed
-                if not self.check_file_exists(self._software_image):
-                    self.ztp_log.info('attempting to transfer image to switch')
-                    # schedule a reload in case something goes wrong
-                    self.do_cli('reload in 30')
-                    transferit = TransferInfo()
-                    transferit.filename = 'something'
-                    self.file_transfer(transferit)
+        # TODO: code for Class construct
+        if self.upgrade_required and False:
+            # check if image transfer needed
+            if not self.check_file_exists(self._software_image):
+                self.ztp_log.info('attempting to transfer image to switch')
+                # schedule a reload in case something goes wrong
+                self.do_cli('reload in 30')
+                transferit = self.TransferInfo_tuple(**self.TransferInfo_tuple_defaults)
+                transferit.filename = 'something'
+                self.file_transfer(transferit)
 
-                # check to see if the file exists now and check MD5
-                # TODO: simplify
-                if self.check_file_exists(self._software_image):
-                    if not self.verify_dst_image_md5(self._software_image, self._software_md5):
-                        self.ztp_log.info('failed Xfer file does not exist')
-                        raise ValueError('Failed Xfer')
+            # check to see if the file exists now and check MD5
+            if self.check_file_exists(self._software_image):
+                if not self.verify_dst_image_md5(self._software_image, self._software_md5):
+                    self.ztp_log.info('failed Xfer file does not exist')
+                    raise ValueError('Failed Xfer')
 
                 # TODO: look for INSTALL vs BUNDLE mode from software_mappings table and flip if/where needed
                 self.deploy_eem_upgrade_script(self._software_image, 'upgrade')
@@ -94,16 +247,16 @@ def main():
                     'eem upgrade took more than %s seconds to reload the device. increase the sleep time by few '
                     'minutes before retrying' % timeout_upgrade)
 
-                # Only do cleanup .. if actually did an upgrade in case someone is doing these steps manually and
-                # wnat to keep inactive around
-                self.deploy_eem_cleanup_script('cleanup')
-                self.do_cli('event manager run cleanup')
-                timeout_pause = 30
-                self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
-                time.sleep(timeout_pause)
+            # Only do remove_inactive .. if actually did an upgrade in case someone is doing these steps manually and
+            # want to keep inactive around
+            self.deploy_eem_remove_inactive_script('remove_inactive')
+            self.do_cli('event manager run remove_inactive')
+            timeout_pause = 30
+            self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
+            time.sleep(timeout_pause)
 
-            else:
-                self.ztp_log.info('no upgrade is required')
+        else:
+            self.ztp_log.info('no upgrade is required')
 
         # TODO: add SMU and APSP & APDP support
 
@@ -131,7 +284,8 @@ def main():
         sys.exit(e)
 
 
-class TransferInfo(object):
+# TODO: replacing with namedtuple approach
+class TransferInfo(dict):
     '''
     characteristics of file to be transferred or host to use
     '''
@@ -152,10 +306,16 @@ class TransferInfo(object):
             self.xfer_mode, self.username, self.password, self.hostname, self.port, self.path, self.filename, self.md5)
 
 
-class IOSXEDevice(object):
+class IOSXEDevice(dict):
     '''
     IOSXEDevice as currently running guestshell
     '''
+
+    TransferInfo_tuple = namedtuple('TransferInfo_tuple',
+                                    'xfer_mode username password hostname port path filename md5')
+    TransferInfo_tuple_defaults = {'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
+                                   'port': None, 'path': None, 'filename': None, 'md5': None, }
+
 
     def __init__(self):
         '''
@@ -165,9 +325,7 @@ class IOSXEDevice(object):
         # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # schedule a reload in case something goes wrong
-        self.do_cli('reload in 15')
-        # config_basic_access() so can SSH to the DHCP address assigned
-        self.configure_basic_access()
+        self.do_cli('reload in 5')
 
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
@@ -183,16 +341,16 @@ class IOSXEDevice(object):
         self.current_version = self.get_current_version()
 
         # transfer the seed_file into flash
-        self.seed_file = self.get_seed_filename()
+        self.seed_file = self.file_transfer(self.get_seed_filename())
         # now load the contents for processing here
-        self.file_transfer(self.seed_file)
-        self.seed_file_contents = self.do_cli('term length 0; more flash:%s' % self.seed_file)
+        self.seed_file_contents = self.do_cli('term length 0; more flash:%s' % self.seed_file.filename)
 
-        self.config_file = self.get_config_filename()
+        self.config_file = self.file_transfer(self.get_config_filename())
         # now load the contents for processing here
-        self.file_transfer(self.config_file)
-        self.config_file_contents = self.do_cli('term length 0; more flash:%s' % self.config_file)
+        self.config_file_contents = self.do_cli('term length 0; more flash:%s' % self.config_file.filename)
 
+        # extract the basic access commands from the self.xeed_file and/or self.config_file
+        self.basic_access_commands = self.get_basic_access_commands()
         # chassis_priority aspects
         self.current_chassis = self.get_chassis()
         # TODO: extract chassis_priority from desired config file
@@ -208,7 +366,7 @@ class IOSXEDevice(object):
 
     def get_ztp_script(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        ztp_script = TransferInfo()
+        ztp_script = self.TransferInfo_tuple(**self.TransferInfo_tuple_defaults)
         show_log = self.do_cli('show logging | inc PNP-6-PNP_SCRIPT_STARTED')
         try:
             results = re.search(r"%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)", show_log)
@@ -219,7 +377,7 @@ class IOSXEDevice(object):
                 ztp_script.filename = results.group(4)
                 self.ztp_log.info('found ztp_script %s' % ztp_script)
         except Exception as e:
-            self.ztp_log.debug('An error occurred: %s' % type(e).__name__)
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
         self.ztp_log.info('returning ztp_script %s' % ztp_script)
         return ztp_script
@@ -259,7 +417,7 @@ class IOSXEDevice(object):
             if results is not None:
                 current_version = results.group(1)
         except Exception as e:
-            self.ztp_log.debug('An error occurred: %s' % type(e).__name__)
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
         self.ztp_log.info('found current_version %s' % current_version)
         self.ztp_log.info('returning current_version %s' % current_version)
@@ -270,7 +428,7 @@ class IOSXEDevice(object):
         # start with same place the script came from
         transferit = self.ztp_script
         # change the filename to the seed.yml file
-        transferit.filename = 'ztp-seed-%s.yml' % self.serial
+        transferit.filename = 'ztp-seed-%s.ini' % self.serial
         self.ztp_log.info('returning %s' % transferit)
         return transferit
 
@@ -280,7 +438,7 @@ class IOSXEDevice(object):
         transferit = self.ztp_script
         # change filename to the cfg file
         transferit.filename = '%s-%s.cfg' % (self.model, self.serial)
-        # TODO: extract a more preferred filename .. and TransferInfo definition
+        # TODO: extract a more preferred filename .. and transferit definition
         self.ztp_log.info('returning %s' % transferit)
         return transferit
 
@@ -299,7 +457,7 @@ class IOSXEDevice(object):
                 chassis_number = results.group(1)
                 chassis_priority = results.group(4)
         except Exception as e:
-            self.ztp_log.debug('An error occurred: %s' % type(e).__name__)
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
         self.ztp_log.info('found chassis_number %s with chassis_priority %s' % (chassis_number, chassis_priority))
         self.ztp_log.info('returning chassis_number %s with chassis_priority %s' % (chassis_number, chassis_priority))
@@ -309,8 +467,8 @@ class IOSXEDevice(object):
     def get_target_chassis(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: extract from interpolation of config file
-        chassis_number = 1
-        chassis_priority = 1
+        chassis_number = 2
+        chassis_priority = 2
         chassis_tuple = namedtuple('chassis', 'chassis_number chassis_priority')
         return chassis_tuple(chassis_number, chassis_priority)
 
@@ -319,7 +477,7 @@ class IOSXEDevice(object):
         self.do_cli('chassis %s priority %s' %
                     (self.current_chassis.chassis_priority, self.target_chassis.chassis_priority))
         self.do_cli('reload')
-        timeout_pause = 60
+        timeout_pause = 180
         self.ztp_log.info(
             'pausing %s seconds to let change_chassis_priority() trigger a reload' % timeout_pause)
         time.sleep(timeout_pause)
@@ -329,7 +487,7 @@ class IOSXEDevice(object):
         self.do_cli('chassis %s priority %s' %
                     (self.current_chassis.chassis_number, self.target_chassis.chassis_number))
         self.do_cli('reload')
-        timeout_pause = 60
+        timeout_pause = 180
         self.ztp_log.info(
             'pausing %s seconds to let change_chassis_number() trigger a reload' % timeout_pause)
         time.sleep(timeout_pause)
@@ -342,12 +500,12 @@ class IOSXEDevice(object):
                 'software_target': '17.13.01',
                 'software_table': {
                     '17,13.01': {
-                        'img': TransferInfo(filename='C9800-80-universalk9_wlc.17.13.01.SPA.bin',
-                                            md5='35b30f64fca28112ab903733a44acde0'),
+                        'img': self.TransferInfo_tuple(filename='C9800-80-universalk9_wlc.17.13.01.SPA.bin',
+                                                       md5='35b30f64fca28112ab903733a44acde0'),
                     },
                     '17.09.04a': {
-                        'img': TransferInfo(filename='C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
-                                            md5='9d7e3c491ef1903b51b2e4067522a1f8'),
+                        'img': self.TransferInfo_tuple(filename='C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
+                                                       md5='9d7e3c491ef1903b51b2e4067522a1f8'),
                     },
                 },
             },
@@ -355,12 +513,12 @@ class IOSXEDevice(object):
                 'software_target': '17.13.01',
                 'software_table': {
                     '17.13.01': {
-                        'img': TransferInfo(filename='9800-40-universalk9_wlc.17.13.01.SPA.bin',
-                                            md5='35b30f64fca28112ab903733a44acde0'),
+                        'img': self.TransferInfo_tuple(filename='9800-40-universalk9_wlc.17.13.01.SPA.bin',
+                                                       md5='35b30f64fca28112ab903733a44acde0'),
                     },
                     '17.09.04a': {
-                        'img': TransferInfo(filename='C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
-                                            md5='9d7e3c491ef1903b51b2e4067522a1f8'),
+                        'img': self.TransferInfo_tuple(filename='C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
+                                                       md5='9d7e3c491ef1903b51b2e4067522a1f8'),
                     },
                 },
             },
@@ -368,28 +526,28 @@ class IOSXEDevice(object):
                 'software_target': '17.13.01',
                 'software_table': {
                     '17.13.01': {
-                        'img': TransferInfo(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
-                                            md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
+                        'img': self.TransferInfo_tuple(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                                                       md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
                     },
                     '17.09.04a': {
-                        'img': TransferInfo(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                            md5='70d8a8c0009fc862349a200fd62a0244'),
+                        'img': self.TransferInfo_tuple(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                                                       md5='70d8a8c0009fc862349a200fd62a0244'),
                     },
                     '17.03.04': {
-                        'img': TransferInfo(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
-                                            md5='c92d08d632d23940d03dea0bbf4d5ab5'),
-                        'APDP': TransferInfo(filename='',
-                                             md5=''),
-                        'SMU': TransferInfo(filename='',
-                                            md5=''),
+                        'img': self.TransferInfo_tuple(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
+                                                       md5='c92d08d632d23940d03dea0bbf4d5ab5'),
+                        'APDP': self.TransferInfo_tuple(filename='',
+                                                        md5=''),
+                        'SMU': self.TransferInfo_tuple(filename='',
+                                                       md5=''),
                         'APSP': [
-                            TransferInfo(filename='',
-                                         md5=''),
-                            TransferInfo(filename='',
-                                         md5=''),
+                            self.TransferInfo_tuple(filename='',
+                                                    md5=''),
+                            self.TransferInfo_tuple(filename='',
+                                                    md5=''),
                         ],
-                        'WEB': TransferInfo(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
-                                            md5='d9bebd6f10c8b66485a6910eb6113f6c'),
+                        'WEB': self.TransferInfo_tuple(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
+                                                       md5='d9bebd6f10c8b66485a6910eb6113f6c'),
                     },
                 },
             },
@@ -397,28 +555,28 @@ class IOSXEDevice(object):
                 'software_target': '17.13.01',
                 'software_table': {
                     '17.13.01': {
-                        'img': TransferInfo(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
-                                            md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
+                        'img': self.TransferInfo_tuple(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                                                       md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
                     },
                     '17.09.04a': {
-                        'img': TransferInfo(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                            md5='70d8a8c0009fc862349a200fd62a0244'),
+                        'img': self.TransferInfo_tuple(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                                                       md5='70d8a8c0009fc862349a200fd62a0244'),
                     },
                     '17.03.04': {
-                        'img': TransferInfo(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
-                                            md5='c92d08d632d23940d03dea0bbf4d5ab5'),
-                        'APDP': TransferInfo(filename='',
-                                             md5=''),
-                        'SMU': TransferInfo(filename='',
-                                            md5=''),
+                        'img': self.TransferInfo_tuple(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
+                                                       md5='c92d08d632d23940d03dea0bbf4d5ab5'),
+                        'APDP': self.TransferInfo_tuple(filename='',
+                                                        md5=''),
+                        'SMU': self.TransferInfo_tuple(filename='',
+                                                       md5=''),
                         'APSP': [
-                            TransferInfo(filename='',
-                                         md5=''),
-                            TransferInfo(filename='',
-                                         md5=''),
+                            self.TransferInfo_tuple(filename='',
+                                                    md5=''),
+                            self.TransferInfo_tuple(filename='',
+                                                    md5=''),
                         ],
-                        'WEB': TransferInfo(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
-                                            md5='d9bebd6f10c8b66485a6910eb6113f6c'),
+                        'WEB': self.TransferInfo_tuple(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
+                                                       md5='d9bebd6f10c8b66485a6910eb6113f6c'),
                     },
                 },
             },
@@ -441,6 +599,22 @@ class IOSXEDevice(object):
         self.ztp_log.info('returning software_target %s' % software_target)
         return software_target
 
+    def get_basic_access_commands(self):
+        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        # TODO: replace username with information from seed_file
+        # extract the basic access commands from the self.xeed_file and/or self.config_file
+        configure_basic_access_commands = [
+            'username ZTP privilege 15 password Cr8zyM@n',
+            'ip domain name ZTP',
+            'crypto key generate rsa modulus 4096',
+            'line con 0',
+            '  logging synchronous',
+            'line vty 0 15',
+            '  logging synchronous',
+            '  login local',
+        ]
+        return(configure_basic_access_commands)
+
     def configure_basic_access(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: replace username with information from seed_file
@@ -455,6 +629,7 @@ class IOSXEDevice(object):
             '  login local',
         ]
         self.do_configure(configure_basic_access_commands)
+        return(configure_basic_access_commands)
 
     def configure_replace(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -496,7 +671,7 @@ class IOSXEDevice(object):
                         ]
         self.do_configure(eem_commands)
 
-    def deploy_eem_cleanup_script(self, app_label='cleanup'):
+    def deploy_eem_remove_inactive_script(self, app_label='remove_inactive'):
         self.ztp_log.info(
             'called from %s()@%s with (app_label=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], app_label))
         install_command = 'install remove inactive'
@@ -509,7 +684,7 @@ class IOSXEDevice(object):
                         ]
         self.do_configure(eem_commands)
 
-    def file_transfer(self, transferit: TransferInfo):
+    def file_transfer(self, transferit: TransferInfo_tuple):
         self.ztp_log.info('called from %s()@%s with (%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], transferit))
         command = 'copy ' + transferit.xfer_mode + '://'
@@ -531,7 +706,12 @@ class IOSXEDevice(object):
         # TODO: look for leading & trailing '/' and remove
         command = command + '/' + filename
         command = command + ' flash:' + filename
-        self.do_cli(command)
+        #TODO: wrap in try/except to know if transfer was OK
+        try:
+            self.do_cli(command)
+        except e as Exception:
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+            print(e)
         self.ztp_log.info('returning %s' % transferit)
         return transferit
 
@@ -561,7 +741,7 @@ class IOSXEDevice(object):
             try:
                 results = cli(command)
             except Exception as e:
-                self.ztp_log.debug('An error occurred: %s' % type(e).__name__)
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
             self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
         return results
@@ -573,9 +753,9 @@ class IOSXEDevice(object):
         try:
             results = configure(command)
         except Exception as e:
-            self.ztp_log.debug('An error occurred: %s' % type(e).__name__)
-            self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
+            self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
         return results
 
     def check_upgrade_required(self):
@@ -613,14 +793,20 @@ class IOSXEDevice(object):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: fetch these things from an ini file from the server
         xfer_servers = [
-            TransferInfo(xfer_mode='syslog', hostname='192.168.201.210'),
-            TransferInfo(xfer_mode='ntp', hostname='192.168.201.254'),
-            TransferInfo(xfer_mode='https', hostname='192.168.201.114', path='ztp'),
-            TransferInfo(xfer_mode='http', hostname='192.168.201.114', path='ztp'),
-            TransferInfo(xfer_mode='scp', hostname='192.168.201.114', path='ztp'),
-            TransferInfo(xfer_mode='ftp', hostname='192.168.201.114', path='ztp'),
-            TransferInfo(xfer_mode='tftp', hostname='192.168.201.114', path='ztp'),
+            self.TransferInfo_tuple(xfer_mode='syslog', hostname='192.168.201.210'),
+            self.TransferInfo_tuple(xfer_mode='ntp', hostname='192.168.201.254'),
+            self.TransferInfo_tuple(xfer_mode='https', hostname='192.168.201.114', path='ztp'),
+            self.TransferInfo_tuple(xfer_mode='http', hostname='192.168.201.114', path='ztp'),
+            self.TransferInfo_tuple(xfer_mode='scp', hostname='192.168.201.114', path='ztp'),
+            self.TransferInfo_tuple(xfer_mode='ftp', hostname='192.168.201.114', path='ztp'),
+            self.TransferInfo_tuple(xfer_mode='tftp', hostname='192.168.201.114', path='ztp'),
         ]
+        # start with same place the script came from
+        transferit = self.ztp_script
+        # change the filename to the ztp-default-xfer-servers.ini file
+        transferit.filename = 'ztp-default-xfer-servers.ini' % self.serial
+        self.file_transfer(transferit)
+        # TODO: extract from file as xfer_servers list
         self.ztp_log.info('returning xfer_servers %s' % xfer_servers)
         return xfer_servers
 
@@ -658,7 +844,7 @@ class IOSXEDevice(object):
                 self.eem_action_syslog('%s@%s: %s' % (record.funcName, record.lineno, record.msg),
                                        priority=syslog_priority)
             except Exception as e:
-                print('An error occurred: %s' % type(e).__name__)
+                print('do_guestshell_syslog error occurred: %s' % type(e).__name__)
                 print(e)
             return True
 

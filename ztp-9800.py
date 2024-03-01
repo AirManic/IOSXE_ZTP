@@ -667,8 +667,8 @@ class IOSXEDevice(dict):
 
         # start with same place the script came from
         transferit = self.ztp_script
-        # change the filename to the ztp-default-xfer-servers.ini file
-        transferit = transferit._replace(filename='ztp-default-xfer-servers.ini')
+        # change the filename to the ztp-defaults.ini file
+        transferit = transferit._replace(filename='ztp-defaults.ini')
         self.file_transfer(transferit)
         # TODO: extract from file as xfer_servers list
         self.ztp_log.info('returning xfer_servers %s' % xfer_servers)

@@ -10,15 +10,18 @@ import time
 import sys
 import inspect
 import logging
+from typing import Union
 from logging.handlers import RotatingFileHandler, SysLogHandler
 import os
 
+# only turn this on if want more gory detail of big blocks of logging output and such
+code_debugging = True
 
 def main():
     try:
 
         # schedule a reload in case something goes wrong
-        cli('reload in 5')
+        cli('reload in 60 reason IOSXEDevice.main@ primary watchdog')
 
         # create a device so can start to call logger aspects
         # calling it "self".. so it sort of looks and acts a lot like the Class behavior
@@ -30,10 +33,7 @@ def main():
         # config_basic_access() so can SSH to the DHCP address assigned
         self.configure_basic_access()
 
-        # schedule a reload in case something goes wrong
-        self.do_cli('reload in 5')
-
-        if self.software_target is not None:
+        if self.version_current:
             # check to see if we have a sufficient model prefix match
             # .. look for model with the longest starts with match in software_mappings
             results = [i for i in self.software_mappings.keys() if self.model.startswith(i)]
@@ -42,30 +42,30 @@ def main():
             self.ztp_log.debug('_fetch_model is %s' % self._fetch_model)
 
         self._fetch_software = None
-        if self._fetch_model is not None:
-        # .. look for software_target in model table
+        if self._fetch_model:
+        # .. look for version_current in model table
             results = [i for i in self.software_mappings[self._fetch_model].keys() if
-                i == self.software_target]
+                i == self.version_current]
             self._fetch_software = results[0] if len(results) == 1 else ''
-            if self._fetch_software is not None:
+            if self._fetch_software:
                 self.ztp_log.info('found %s when searching for %s in %s' % (
-                    results, self.software_target,
+                    results, self.version_current,
                     self.software_mappings[self._fetch_model].keys()))
 
-        if self._fetch_model is not None and self._fetch_software is not None:
+        if self._fetch_model and self._fetch_software:
             self._software_image = self.software_mappings[self._fetch_model][self._fetch_software][img]
             self._software_md5 = self.software_mappings[self._fetch_model][self._fetch_software]['md5']
         self.ztp_log.info('target image is %s with md5 %s' % (self._fetch_software, self._software_md5))
-        self.ztp_log.info('current version is %s' % self.current_version)
+        self.ztp_log.info('current version is %s' % self.version_current)
 
         if self.upgrade_required and False:
             # check if image transfer needed
             if not self.check_file_exists(self._software_image):
                 self.ztp_log.info('attempting to transfer image to switch')
-                # schedule a reload in case something goes wrong
-                self.do_cli('reload in 30')
-                transferit = self.TransferInfo_tuple_create()
+                # TODO: reload only for develop cycling
+                transferit = TransferInfo_tuple_create()
                 transferit = transferit._replace(filename='something')
+                self.do_cli('reload in 30 reason main@ file_transfer %s' % [transferit])
                 self.file_transfer(transferit)
 
             # check to see if the file exists now and check MD5
@@ -78,8 +78,8 @@ def main():
                 self.deploy_eem_upgrade_script(self._software_image, 'upgrade')
                 self.ztp_log.info('performing the upgrade - switch will reload')
 
-                # schedule a reload in case something goes wrong
-                self.do_cli('reload in 90')
+                # TODO: reload only for develop cycling
+                self.do_cli('reload in 90 reason main@ event manager run upgrade')
                 self.do_cli('event manager run upgrade')
                 timeout_pause = 3600
                 self.ztp_log.info(
@@ -102,9 +102,9 @@ def main():
 
         # TODO: add SMU and APSP & APDP support
 
-        if self.current_chassis.chassis_priority != self.target_chassis.chassis_priority:
+        if self.chassis_current.chassis_priority != self.chassis_target.chassis_priority:
             self.change_chassis_priority()
-        if self.current_chassis.chassis_number != self.target_chassis.chassis_number:
+        if self.chassis_current.chassis_number != self.chassis_target.chassis_number:
             self.change_chassis_number()
 
         self.ztp_log.info('Day0 configuration push')
@@ -113,9 +113,9 @@ def main():
         self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
         time.sleep(timeout_pause)
         # TODO:  .. neutered for now
-        do_cli('! write memory')
+        self.do_cli('! write memory')
 
-        do_configure('crypto key generate rsa modulus 4096')
+        self.do_configure('crypto key generate rsa modulus 4096')
         self.ztp_log.info('END')
 
     except Exception as e:
@@ -126,26 +126,105 @@ def main():
         sys.exit(e)
 
 
-# TODO: replacing with namedtuple approach
-class TransferInfo(dict):
-    '''
-    characteristics of file to be transferred or host to use
-    '''
+def configure_logger(logger_name='ZTP'):
+    logging.getLogger(logger_name)
+    ztp_log = get_logger(logger_name)
+    ztp_log.setLevel(logging.DEBUG)
 
-    def __init__(self, xfer_mode=None, username=None, password=None, hostname=None, port=None,
-                 path=None, filename=None, md5=None):
-        self.xfer_mode = xfer_mode
-        self.username = username
-        self.password = password
-        self.hostname = hostname
-        self.port = port
-        self.path = path
-        self.filename = filename
-        self.md5 = md5
+    # Create sys.stdout Stream handler
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(
+        logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
+    ztp_log.addHandler(handler)
 
-    def __str__(self):
-        return 'xfer_mode=%s username=%s password=%s hostname=%s port=%s path=%s filename=%s md5=%s' % (
-            self.xfer_mode, self.username, self.password, self.hostname, self.port, self.path, self.filename, self.md5)
+    ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+    ztp_log.info('logger %s created' % ztp_log)
+
+    def eem_action_syslog(message, priority='6'):
+        # trigger a SYSLOG message to the IOS-XE logger
+        # transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
+        # TODO: see if escape or literal syntax works for double and single quotes
+        new_msg = message.replace('"', '~')
+        new_msg = new_msg.replace("'", "~")
+        # TODO: remove if not needed
+        # new_msg = new_msg.replace("\n", " ; ")
+        new_msg = new_msg.splitlines()
+        eem_commands = ['no event manager applet eem_action_syslog',
+                        'event manager applet eem_action_syslog',
+                        'event none maxrun 600',]
+        for line in new_msg:
+            eem_commands.append('action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, line, 'ZTP'))
+        # do not call do_configure().. call configure() directly .. otherwise will get loop
+        configure(eem_commands)
+        # do not call do_cli().. call cli() directly .. otherwise will get loop
+        cli('event manager run eem_action_syslog')
+        eem_commands = ['no event manager applet eem_action_syslog']
+        # do not call do_configure().. call configure() directly .. otherwise will get loop
+        configure(eem_commands)
+
+    def do_guestshell_syslog(record):
+        # TODO .. see if this can be fixed
+        # with open('/dev/ttyS3', 'w') as fd:
+        #   fd.write(record.getMessage())
+        # os.system('echo %s > /dev/ttyS3' % record.getMessage())
+        try:
+            # SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
+            syslog_priority = '5'
+            if record.levelname == 'DEBUG': syslog_priority = '7'
+            if record.levelname == 'INFO': syslog_priority = '6'
+            if record.levelname == 'WARNING': syslog_priority = '4'
+            if record.levelname == 'ERROR': syslog_priority = '3'
+            if record.levelname == 'CRITICAL': syslog_priority = '2'
+            eem_action_syslog('%s@%s: %s' % (record.funcName, record.lineno, record.msg), priority=syslog_priority)
+        except Exception as e:
+            print('do_guestshell_syslog error occurred: %s' % type(e).__name__)
+            print(e)
+        return True
+
+    # trigger a SYSLOG message as well using addFilter technique
+    ztp_log.addFilter(do_guestshell_syslog)
+    configure('logging trap debugging')
+    ztp_log.info('configured logging trap debugging')
+
+    # TODO .. see if this can be fixed
+    '''
+    # Create SysLogHandler handler
+    handler = logging.handlers.SysLogHandler()
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
+    ztp_log.addHandler(handler)
+    '''
+    # TODO .. see if this can be fixed
+    '''
+    # create a new file > 5 mb size
+    handler = logging.handlers.RotatingFileHandler(filename='flash/guest-share/ztp.log',
+                                                   mode='a', maxBytes=5 * 1024 * 1024,
+                                                   backupCount=10, encoding=None, delay=0)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
+    ztp_log.addHandler(handler)
+    '''
+    return ztp_log
+
+def get_logger(logger_name='ZTP'):
+    ztp_log = logging.getLogger(logger_name)
+    ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+    return ztp_log
+
+
+TransferInfo_tuple = namedtuple('TransferInfo_tuple',
+                                'xfer_mode username password hostname port path filename md5')
+TransferInfo_tuple_defaults = {'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
+                               'port': None, 'path': None, 'filename': None, 'md5': None, }
+
+
+def TransferInfo_tuple_create(**kwargs):
+    transferit = TransferInfo_tuple(**TransferInfo_tuple_defaults)
+    transferit = transferit._replace(**kwargs)
+    # TODO: clean up hostname, path and filename.
+    #  - trim whitespace .. and remove any leading & trailing '/'
+    return transferit
 
 
 class IOSXEDevice(dict):
@@ -153,65 +232,57 @@ class IOSXEDevice(dict):
     IOSXEDevice as currently running guestshell
     '''
 
-    TransferInfo_tuple = namedtuple('TransferInfo_tuple',
-                                    'xfer_mode username password hostname port path filename md5')
-    TransferInfo_tuple_defaults = {'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
-                                   'port': None, 'path': None, 'filename': None, 'md5': None, }
-    def TransferInfo_tuple_create(self,**kwargs):
-        transferit = self.TransferInfo_tuple(**self.TransferInfo_tuple_defaults)
-        transferit = transferit._replace(**kwargs)
-        return transferit
-
     def __init__(self):
         '''
         create device attributes by extracting off of device
         '''
-        self.ztp_log = self.configure_logger()
+        self.ztp_log = configure_logger()
         # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # schedule a reload in case something goes wrong
-        self.do_cli('reload in 10')
+        # TODO: reload only for develop cycling
+        self.do_cli('reload in 10 reason IOSXEDevice.__init__@ development cycling')
 
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
-        self.xfer_servers = self.fetch_default_xfer_servers()
+        self.ztp_seed_defaults = (self.file_transfer(self.ztp_script)._replace(filename='ztp-seed-defaults.ini'))
+
+        self.xfer_servers = self.extract_default_xfer_servers(ini_file_contents=self.ztp_seed_defaults)
         # now that servers are loaded.. activate the syslog and ntp references
-        self.configure_syslog_and_ntp()
+        self.configure_syslog_and_ntp(self.xfer_servers)
 
         # create a cache of the show_version
         self.show_version = self.get_show_version()
         # these items use self.show_version
-        self.model = self.get_model()
-        self.serial = self.get_serial()
-        self.current_version = self.get_current_version()
+        self.model = self.get_model(self.show_version)
+        self.serial = self.get_serial(self.show_version)
+        self.version_current = self.get_version_current(self.show_version)
 
         # transfer the seed_file into flash
-        self.seed_file = self.file_transfer(self.get_seed_filename())
+        self.seed_file = self.file_transfer(self.get_seed_filename( serial=self.serial, script=self.ztp_script))
         # now load the contents for processing here
-        self.seed_file_contents = self.do_cli('term length 0; more flash:%s' % self.seed_file.filename)
+        self.seed_file_contents = self.do_cli('enable ; more flash:%s' % self.seed_file.filename)
 
-        self.config_file = self.file_transfer(self.get_config_filename())
+        self.config_file = self.file_transfer(self.get_config_filename(self.serial, self.model, self.ztp_script))
         # now load the contents for processing here
-        self.config_file_contents = self.do_cli('term length 0; more flash:%s' % self.config_file.filename)
+        self.config_file_contents = self.do_cli('enable ; more flash:%s' % self.config_file.filename)
 
-        # extract the basic access commands from the self.xeed_file and/or self.config_file
-        self.basic_access_commands = self.get_basic_access_commands()
+        # extract the basic access commands
+        self.basic_access_commands = self.get_basic_access_commands(seed_file_contents=self.seed_file_contents)
+
         # chassis_priority aspects
-        self.current_chassis = self.get_chassis()
-        # TODO: extract chassis_priority from desired config file
-        self.target_chassis = self.get_target_chassis()
+        self.chassis_current = self.get_chassis_current()
+        self.chassis_target = self.extract_chassis_target(config_file_contents=self.config_file_contents)
 
         # TODO: figure out software mapping.. from global default, import from global file, import from device
         #  specific config
         self.software_mappings = self.fetch_default_software_mapping()
-        self.software_target = self.process_software_target()
+        self.version_target = self.get_version_target()
 
-        # depends on self.show_version & self.software_target
-        self.upgrade_required = self.check_upgrade_required()
+        self.upgrade_required = self.check_upgrade_required(self.version_current, self.version_current)
 
     def get_ztp_script(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        ztp_script = self.TransferInfo_tuple_create()
+        ztp_script = TransferInfo_tuple_create()
         show_log = self.do_cli('show logging | inc PNP-6-PNP_SCRIPT_STARTED')
         try:
             '''
@@ -219,84 +290,98 @@ class IOSXEDevice(dict):
             '''
             results = re.search(r"%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)", show_log)
             if results:
-                ztp_script = ztp_script._replace(xfer_mode=results.group(1))
-                ztp_script = ztp_script._replace(hostname=results.group(2))
-                ztp_script = ztp_script._replace(path=results.group(3))
-                ztp_script = ztp_script._replace(filename=results.group(4))
-                # TODO: TransferInfo_tuple ztp_script cannot translate to %s
-                # self.ztp_log.info('found ztp_script %s' % ztp_script)
-                self.ztp_log.info('found ztp_script')
+                ztp_script = ztp_script._replace(xfer_mode=results.group(1),
+                                                 hostname=results.group(2),
+                                                 path=results.group(3),
+                                                 filename=results.group(4))
+                self.ztp_log.info('found ztp_script %s' % [ztp_script])
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
-        # TODO: TransferInfo_tuple ztp_script cannot translate to %s
-        # self.ztp_log.info('returning ztp_script %s' % ztp_script)
-        self.ztp_log.info('returning ztp_script')
+        # not really sending back list, but putting list wrapper to let it do %s
+        self.ztp_log.info('returning %s' % [ztp_script])
         return ztp_script
 
     def get_show_version(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         show_version = self.do_cli('show version')
-        self.ztp_log.info('found show_version \n%s' % show_version)
-        self.ztp_log.info('returning show_version \n%s' % show_version)
+        if code_debugging: self.ztp_log.info('found show_version \n%s' % show_version)
+        self.ztp_log.info('returning \n%s' % show_version)
         return show_version
 
-    def get_model(self):
+    def get_model(self, show_version:str=None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        try:
-            model = re.search(r"Model Number\s+:\s+(\S+)", self.show_version).group(1)
-        except AttributeError:
-            model = re.search(r"cisco\s(\w+-.*?)\s", self.show_version).group(1)
-        self.ztp_log.info('found model %s' % model)
-        self.ztp_log.info('returning model %s' % model)
+        model = None
+        if show_version:
+            try:
+                model = re.search(r"Model Number\s+:\s+(\S+)", show_version).group(1)
+            except AttributeError:
+                model = re.search(r"cisco\s(\w+-.*?)\s", show_version).group(1)
+            self.ztp_log.info('found model %s' % model)
+        self.ztp_log.info('returning %s' % model)
         return model
 
-    def get_serial(self):
+    def get_serial(self, show_version:str=None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        try:
-            serial = re.search(r"System Serial Number\s+:\s+(\S+)", self.show_version).group(1)
-        except AttributeError:
-            serial = re.search(r"Processor board ID\s+(\S+)", self.show_version).group(1)
-        self.ztp_log.info('found serial %s' % serial)
-        self.ztp_log.info('returning serial %s' % serial)
+        serial = None
+        if show_version:
+            try:
+                serial = re.search(r"System Serial Number\s+:\s+(\S+)", show_version).group(1)
+            except AttributeError:
+                serial = re.search(r"Processor board ID\s+(\S+)", show_version).group(1)
+            self.ztp_log.info('found serial %s' % serial)
+        self.ztp_log.info('returning %s' % serial)
         return serial
 
-    def get_current_version(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        current_version = None
-        try:
-            results = re.search(r"Cisco IOS XE Software, Version\s+(\S+)", self.show_version)
-            if results is not None:
-                current_version = results.group(1)
-        except Exception as e:
-            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-            print(e)
-        self.ztp_log.info('found current_version %s' % current_version)
-        self.ztp_log.info('returning current_version %s' % current_version)
-        return current_version
 
-    def get_seed_filename(self):
+    def get_version_current(self, show_version:str=None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # start with same place the script came from
-        transferit = self.ztp_script
-        # change the filename to the seed.yml file
-        transferit = transferit._replace(filename='ztp-seed-%s.ini' % self.serial)
-        # not really sending back list, but putting list wrapper to let it do %s
+        version_current = None
+        if show_version:
+            try:
+                results = re.search(r"Cisco IOS XE Software, Version\s+(\S+)", show_version)
+                if results:
+                    version_current = results.group(1)
+                    self.ztp_log.info('found %s' % version_current)
+            except Exception as e:
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+                print(e)
+        self.ztp_log.info('returning %s' % version_current)
+        return version_current
+
+    def get_seed_filename(self, serial:str=None, script:TransferInfo_tuple=TransferInfo_tuple_create()):
+        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        transferit = TransferInfo_tuple_create()
+        if script and serial:
+            transferit = script
+            # change the filename to the seed.yml file
+            transferit = transferit._replace(filename='ztp-seed-%s.ini' % serial)
+            # not really sending back list, but putting list wrapper to let it do %s
         self.ztp_log.info('returning %s' % [transferit])
         return transferit
 
-    def get_config_filename(self):
+    def fetch_ztp_seed_defaults(self, filename='ztp-seed-defaults.ini', transferit:TransferInfo_tuple=TransferInfo_tuple_create()):
+        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        # change the filename to the ztp-seed-defaults.ini file
+        transferit = transferit._replace(filename=filename)
+        self.file_transfer(transferit)
+        contents = self.do_cli('enable ; more flash:%s' % transferit.filename)
+        if code_debugging: self.ztp_log.info('returning \n%s' % contents)
+        return contents
+
+
+    def get_config_filename(self, serial:str=None, model:str=None, script:TransferInfo_tuple=TransferInfo_tuple_create()):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # start with same place the script came from
-        transferit = self.ztp_script
+        transferit = script
         # change filename to the cfg file
-        transferit = transferit._replace(filename='%s-%s.cfg' % (self.model, self.serial))
+        transferit = transferit._replace(filename='%s-%s.cfg' % (model, serial))
         # TODO: extract a more preferred filename .. and transferit definition
         # not really sending back list, but putting list wrapper to let it do %s
         self.ztp_log.info('returning %s' % [transferit])
         return transferit
 
-    def get_chassis(self):
+    def get_chassis_current(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         show_chassis = self.do_cli('show chassis')
         chassis_number = None
@@ -307,183 +392,176 @@ class IOSXEDevice(dict):
         try:
             results = re.search(r"\*(\d)\s+(\S+)\s+([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})\s+(\d)",
                                 show_chassis)
-            if results is not None:
+            if results:
                 chassis_number = results.group(1)
                 chassis_priority = results.group(4)
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
         self.ztp_log.info('found chassis_number %s with chassis_priority %s' % (chassis_number, chassis_priority))
-        self.ztp_log.info('returning chassis_number %s with chassis_priority %s' % (chassis_number, chassis_priority))
+        self.ztp_log.info('returning (chassis_number=%s, chassis_priority=%s)' % (chassis_number, chassis_priority))
         chassis_tuple = namedtuple('chassis', 'chassis_number chassis_priority')
         return chassis_tuple(chassis_number, chassis_priority)
 
-    def get_target_chassis(self):
+    def extract_chassis_target(self, config_file_contents:str=None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO: extract from interpolation of config file
+        if config_file_contents:
+            pass
+            # TODO: extract chassis_priority from desired config file interpolation
         chassis_number = 2
         chassis_priority = 2
         chassis_tuple = namedtuple('chassis', 'chassis_number chassis_priority')
         return chassis_tuple(chassis_number, chassis_priority)
 
-    def change_chassis_priority(self):
+    def change_chassis_priority(self, chassis_in:namedtuple ):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        self.do_cli('chassis %s priority %s' %
-                    (self.current_chassis.chassis_priority, self.target_chassis.chassis_priority))
-        self.do_cli('reload')
-        timeout_pause = 180
-        self.ztp_log.info(
-            'pausing %s seconds to let change_chassis_priority() trigger a reload' % timeout_pause)
-        time.sleep(timeout_pause)
+        if chassis_in:
+            self.do_cli('chassis %s priority %s' %
+                        (chassis_in.chassis_number, chassis_in.chassis_priority))
+            self.do_cli('reload reason change_chassis_priority@ to %s' % chassis_in.chassis_priority)
+            timeout_pause = 180
+            self.ztp_log.info(
+                'pausing %s seconds to let change_chassis_priority() trigger a reload' % timeout_pause)
+            time.sleep(timeout_pause)
+        # should never get to return, as reload should occur.. although returning False in case it does return
+        return False
 
-    def change_chassis_number(self):
+    def change_chassis_number(self, chassis_in:namedtuple ):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        self.do_cli('chassis %s priority %s' %
-                    (self.current_chassis.chassis_number, self.target_chassis.chassis_number))
-        self.do_cli('reload')
-        timeout_pause = 180
-        self.ztp_log.info(
-            'pausing %s seconds to let change_chassis_number() trigger a reload' % timeout_pause)
-        time.sleep(timeout_pause)
+        if chassis_in:
+            # TODO: work up chassis number change
+            self.do_cli('chassis %s priority %s' %
+                        (chassis_in.chassis_number, chassis_in.chassis_number))
+            self.do_cli('reload reason change_chassis_number@ to %s' % chassis_in.chassis_number)
+            timeout_pause = 180
+            self.ztp_log.info('pausing %s seconds to let change_chassis_number() trigger a reload' % timeout_pause)
+            time.sleep(timeout_pause)
+        # should never get to return, as reload should occur.. although returning False in case it does return
+        return False
 
     def fetch_default_software_mapping(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: fetch these things from an ini file from the server
+        # TODO: when extracting ... for path, if honor leading '/', else build path as inheritance down hierarchy starting with ztp-script as starting point
         software_mappings = {
             'C9800-80': {
-                'software_target': '17.13.01',
+                'version_target': '17.13.01',
                 'software_table': {
                     '17,13.01': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-80-universalk9_wlc.17.13.01.SPA.bin',
-                                                              md5='35b30f64fca28112ab903733a44acde0'),
+                        'img': TransferInfo_tuple_create(filename='C9800-80-universalk9_wlc.17.13.01.SPA.bin',
+                                                         md5='35b30f64fca28112ab903733a44acde0'),
                     },
                     '17.09.04a': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
-                                                              md5='9d7e3c491ef1903b51b2e4067522a1f8'),
+                        'img': TransferInfo_tuple_create(filename='C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
+                                                         md5='9d7e3c491ef1903b51b2e4067522a1f8'),
                     },
                 },
             },
             'C9800-40': {
-                'software_target': '17.13.01',
+                'version_target': '17.13.01',
                 'software_table': {
                     '17.13.01': {
-                        'img': self.TransferInfo_tuple_create(filename='9800-40-universalk9_wlc.17.13.01.SPA.bin',
-                                                              md5='35b30f64fca28112ab903733a44acde0'),
+                        'img': TransferInfo_tuple_create(filename='9800-40-universalk9_wlc.17.13.01.SPA.bin',
+                                                         md5='35b30f64fca28112ab903733a44acde0'),
                     },
                     '17.09.04a': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
-                                                              md5='9d7e3c491ef1903b51b2e4067522a1f8'),
+                        'img': TransferInfo_tuple_create(filename='C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
+                                                         md5='9d7e3c491ef1903b51b2e4067522a1f8'),
                     },
                 },
             },
             'C9800-L': {
-                'software_target': '17.13.01',
+                'version_target': '17.13.01',
                 'software_table': {
                     '17.13.01': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
-                                                              md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
+                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                                                         md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
                     },
                     '17.09.04a': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                                              md5='70d8a8c0009fc862349a200fd62a0244'),
+                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                                                         md5='70d8a8c0009fc862349a200fd62a0244'),
                     },
                     '17.03.04': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
-                                                              md5='c92d08d632d23940d03dea0bbf4d5ab5'),
-                        'APDP': self.TransferInfo_tuple_create(filename='',
-                                                               md5=''),
-                        'SMU': self.TransferInfo_tuple_create(filename='',
-                                                              md5=''),
+                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
+                                                         md5='c92d08d632d23940d03dea0bbf4d5ab5'),
+                        'APDP': TransferInfo_tuple_create(filename='',
+                                                          md5=''),
+                        'SMU': TransferInfo_tuple_create(filename='',
+                                                         md5=''),
                         'APSP': [
-                            self.TransferInfo_tuple_create(filename='',
-                                                           md5=''),
-                            self.TransferInfo_tuple_create(filename='',
-                                                           md5=''),
+                            TransferInfo_tuple_create(filename='',
+                                                      md5=''),
+                            TransferInfo_tuple_create(filename='',
+                                                      md5=''),
                         ],
-                        'WEB': self.TransferInfo_tuple_create(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
-                                                              md5='d9bebd6f10c8b66485a6910eb6113f6c'),
+                        'WEB': TransferInfo_tuple_create(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
+                                                         md5='d9bebd6f10c8b66485a6910eb6113f6c'),
                     },
                 },
             },
             'C9800-L-C-K9': {
-                'software_target': '17.13.01',
+                'version_target': '17.13.01',
                 'software_table': {
                     '17.13.01': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
-                                                              md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
+                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
+                                                         md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
                     },
                     '17.09.04a': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                                              md5='70d8a8c0009fc862349a200fd62a0244'),
+                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
+                                                         md5='70d8a8c0009fc862349a200fd62a0244'),
                     },
                     '17.03.04': {
-                        'img': self.TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
-                                                              md5='c92d08d632d23940d03dea0bbf4d5ab5'),
-                        'APDP': self.TransferInfo_tuple_create(filename='',
-                                                               md5=''),
-                        'SMU': self.TransferInfo_tuple_create(filename='',
-                                                              md5=''),
+                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
+                                                         md5='c92d08d632d23940d03dea0bbf4d5ab5'),
+                        'APDP': TransferInfo_tuple_create(filename='',
+                                                          md5=''),
+                        'SMU': TransferInfo_tuple_create(filename='',
+                                                         md5=''),
                         'APSP': [
-                            self.TransferInfo_tuple_create(filename='',
-                                                           md5=''),
-                            self.TransferInfo_tuple_create(filename='',
-                                                           md5=''),
+                            TransferInfo_tuple_create(filename='',
+                                                      md5=''),
+                            TransferInfo_tuple_create(filename='',
+                                                      md5=''),
                         ],
-                        'WEB': self.TransferInfo_tuple_create(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
-                                                              md5='d9bebd6f10c8b66485a6910eb6113f6c'),
+                        'WEB': TransferInfo_tuple_create(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
+                                                         md5='d9bebd6f10c8b66485a6910eb6113f6c'),
                     },
                 },
             },
             'C9800-CL': {
                 # does not support IOX and guestshell
-                'software_target': None,
+                'version_target': None,
             },
         }
-        self.ztp_log.info('returning software_mappings %s' % software_mappings)
+        if code_debugging: self.ztp_log.info('returning %s' % software_mappings)
         return software_mappings
 
-    def process_software_target(self):
+    def get_version_target(self):
         '''
         determine best software target from per serial config file, overall software_mapping, else overall target
         :return:
         '''
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO process tables to yeild serial, software, global pecking order
-        software_target = None
-        self.ztp_log.info('returning software_target %s' % software_target)
-        return software_target
+        version_target = None
+        self.ztp_log.info('returning %s' % version_target)
+        return version_target
 
-    def get_basic_access_commands(self):
+    def get_basic_access_commands(self, seed_file_contents:str=None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO: replace username with information from seed_file
-        # extract the basic access commands from the self.xeed_file and/or self.config_file
-        configure_basic_access_commands = [
-            'username ZTP privilege 15 password Cr8zyM@n',
-            'ip domain name ZTP',
-            'crypto key generate rsa modulus 4096',
-            'line con 0',
-            '  logging synchronous',
-            'line vty 0 15',
-            '  logging synchronous',
-            '  login local',
-        ]
-        return(configure_basic_access_commands)
+        commands = None
+        if seed_file_contents:
+            pass
+            # TODO: replace username with information from seed_file
+            # extract the basic access commands from the self.xeed_file and/or self.config_file
+        if code_debugging: self.ztp_log.info('returning %s' % commands)
+        return(commands)
 
-    def configure_basic_access(self):
+    def configure_basic_access(self, commands:str=None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO: replace username with information from seed_file
-        configure_basic_access_commands = [
-            'username ZTP privilege 15 password Cr8zyM@n',
-            'ip domain name ZTP',
-            'crypto key generate rsa modulus 4096',
-            'line con 0',
-            '  logging synchronous',
-            'line vty 0 15',
-            '  logging synchronous',
-            '  login local',
-        ]
-        self.do_configure(configure_basic_access_commands)
-        return(configure_basic_access_commands)
+        if commands:
+            self.do_configure(commands)
+        return(commands)
 
     def configure_replace(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -516,7 +594,8 @@ class IOSXEDevice(dict):
         self.ztp_log.info('called from %s()@%s with (image=%s, app_label=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], image, app_label))
         install_command = 'install add file flash:/' + image + ' activate commit'
-        eem_commands = ['event manager applet %s' % app_label,
+        eem_commands = ['no event manager applet %s' % app_label,
+                        'event manager applet % s' % app_label,
                         'event none maxrun 600',
                         'action 1.0 cli command "enable"',
                         'action 2.0 cli command "%s" pattern "\[y\/n\/q\]"' % install_command,
@@ -529,7 +608,8 @@ class IOSXEDevice(dict):
         self.ztp_log.info(
             'called from %s()@%s with (app_label=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], app_label))
         install_command = 'install remove inactive'
-        eem_commands = ['event manager applet %s' % app_label,
+        eem_commands = ['no event manager applet %s' % app_label,
+                        'event manager applet %s' % app_label,
                         'event none maxrun 600',
                         'action 1.0 cli command "enable"',
                         'action 2.0 cli command "%s" pattern "\[y\/n\]"' % install_command,
@@ -538,34 +618,35 @@ class IOSXEDevice(dict):
                         ]
         self.do_configure(eem_commands)
 
-    def file_transfer(self, transferit: TransferInfo_tuple):
+    def file_transfer(self, transferit:TransferInfo_tuple=TransferInfo_tuple_create(), filesys='flash:'):
         self.ztp_log.info('called from %s()@%s with (%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], transferit))
-        command = 'copy ' + transferit.xfer_mode + '://'
-        if transferit.username is not None:
-            command = command + transferit.username
-            if transferit.password is not None:
-                command = command + ':' + transferit.password
-            command = command + '@'
-        hostname = transferit.hostname
-        # TODO: look for leading & trailing '/' and remove
-        command = command + hostname
-        if transferit.port is not None:
-            command = command + ':' + transferit.port
-        path = transferit.path
-        if path is not None:
+        if transferit.xfer_mode and transferit.hostname and transferit.filename:
+            command = 'copy ' + transferit.xfer_mode + '://'
+            if transferit.username:
+                command = command + transferit.username
+                if transferit.password:
+                    command = command + ':' + transferit.password
+                command = command + '@'
+            hostname = transferit.hostname
             # TODO: look for leading & trailing '/' and remove
-            command = command + '/' + path
-        filename = transferit.filename
-        # TODO: look for leading & trailing '/' and remove
-        command = command + '/' + filename
-        command = command + ' flash:' + filename
-        #TODO: wrap in try/except to know if transfer was OK
-        try:
-            self.do_cli(command)
-        except e as Exception:
-            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-            print(e)
+            command = command + hostname
+            if transferit.port:
+                command = command + ':' + transferit.port
+            path = transferit.path
+            if path:
+                # TODO: look for leading & trailing '/' and remove
+                command = command + '/' + path
+            filename = transferit.filename
+            # TODO: look for leading & trailing '/' and remove
+            command = command + '/' + filename
+            command = command + ' ' + filesys + filename
+            #TODO: wrap in try/except to know if transfer was OK
+            try:
+                self.do_cli(command)
+            except e as Exception:
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+                print(e)
         # not really sending back list, but putting list wrapper to let it do %s
         self.ztp_log.info('returning %s' % [transferit])
         return transferit
@@ -580,7 +661,7 @@ class IOSXEDevice(dict):
                 command = 'no %s' % (cert)
                 self.do_configure(command)
 
-    def do_cli(self, command):
+    def do_cli(self, command:str=None):
         self.ztp_log.info(
             'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
@@ -598,10 +679,12 @@ class IOSXEDevice(dict):
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
-            self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
+                # only print results if got an exception
+                self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
+        # don't log results... as most of the results are long
         return results
 
-    def do_configure(self, command):
+    def do_configure(self, command:Union[str,list]):
         self.ztp_log.info(
             'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
@@ -613,15 +696,12 @@ class IOSXEDevice(dict):
             self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
         return results
 
-    def check_upgrade_required(self):
+    def check_upgrade_required(self, version_current: str = None, version_target: str = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        self.ztp_log.info(
-            'Current Code Version is %s and Target Code Version is %s' % (
-                self.current_version, self.software_target))
-        if self.current_version == self.software_target:
-            return False,
-        else:
-            return True
+        self.ztp_log.info('Code Version Current is %s and Code Version Target is %s' % (version_current, version_target))
+        result = version_current == version_target
+        self.ztp_log.info('returning %s' % result)
+        return result
 
     def verify_dst_image_md5(self, image, src_md5, file_system='flash:/'):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -644,124 +724,41 @@ class IOSXEDevice(dict):
             self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
             return False
 
-    def fetch_default_xfer_servers(self):
+    def extract_default_xfer_servers(self, ini_file_contents: str = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO: fetch these things from an ini file from the server
+        xfer_servers = None
+        if ini_file_contents:
+            pass
+            self.ztp_log.info('contents are %s' % ini_file_contents)
+            # TODO: extract from file as xfer_servers list
+
+        # TODO: temporary list
         xfer_servers = []
-        server = self.TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210')
+        server = TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210')
         xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210')
+        server = TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210')
         xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='ntp', hostname='192.168.201.254')
-        xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='https', hostname='192.168.201.114', path='ztp')
-        xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='http', hostname='192.168.201.114', path='ztp')
-        xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='scp', hostname='192.168.201.114', path='ztp')
-        xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='ftp', hostname='192.168.201.114', path='ztp')
-        xfer_servers.append(server)
-        server = self.TransferInfo_tuple_create(xfer_mode='tftp', hostname='192.168.201.114', path='ztp')
+        server = TransferInfo_tuple_create(xfer_mode='ntp', hostname='192.168.201.254')
         xfer_servers.append(server)
 
-        # start with same place the script came from
-        transferit = self.ztp_script
-        # change the filename to the ztp-defaults.ini file
-        transferit = transferit._replace(filename='ztp-defaults.ini')
-        self.file_transfer(transferit)
-        # TODO: extract from file as xfer_servers list
-        self.ztp_log.info('returning xfer_servers %s' % xfer_servers)
+        self.ztp_log.info('returning %s' % xfer_servers)
         return xfer_servers
 
-    def configure_syslog_and_ntp(self):
+    def configure_syslog_and_ntp(self, xfer_servers: list = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        self.do_configure('logging trap debugging')
-        for srv in self.xfer_servers:
-            if srv.xfer_mode == 'syslog':
-                self.ztp_log.debug('adding ZTP syslog servers')
-                if isinstance(srv.hostname, str): self.do_configure('logging host %s' % srv.hostname)
-                if isinstance(srv.hostname, list):
-                    for i in srv.hostname: self.do_configure('logging host %s' % i)
-            if srv.xfer_mode == 'ntp':
-                self.ztp_log.debug('adding ZTP ntp servers')
-                if isinstance(srv.hostname, str): self.do_configure('ntp server %s' % srv.hostname)
-                if isinstance(srv.hostname, list):
-                    for i in srv.hostname: self.do_configure('ntp server %s' % i)
-
-    def configure_logger(self):
-        self.ztp_log = logging.getLogger('ZTP')
-        self.ztp_log.setLevel(logging.DEBUG)
-
-        def do_guestshell_syslog(record):
-            # TODO .. see if this can be fixed
-            # with open('/dev/ttyS3', 'w') as fd:
-            #   fd.write(record.getMessage())
-            # os.system('echo %s > /dev/ttyS3' % record.getMessage())
-            try:
-                syslog_priority = '5'
-                if record.levelname == 'DEBUG': syslog_priority = '7'
-                if record.levelname == 'INFO': syslog_priority = '6'
-                if record.levelname == 'WARNING': syslog_priority = '4'
-                if record.levelname == 'ERROR': syslog_priority = '3'
-                if record.levelname == 'CRITICAL': syslog_priority = '2'
-                self.eem_action_syslog('%s@%s: %s' % (record.funcName, record.lineno, record.msg),
-                                       priority=syslog_priority)
-            except Exception as e:
-                print('do_guestshell_syslog error occurred: %s' % type(e).__name__)
-                print(e)
-            return True
-
-        # trigger a SYSLOG message as well
-        self.ztp_log.addFilter(do_guestshell_syslog)
-
-        # Create sys.stdout Stream handler
-        handler = logging.StreamHandler()
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(
-            logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-
-        # TODO .. see if this can be fixed
-        '''
-        # Create SysLogHandler handler
-        handler = logging.handlers.SysLogHandler()
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-        '''
-
-        # TODO .. see if this can be fixed
-        '''
-        # create a new file > 5 mb size
-        handler = logging.handlers.RotatingFileHandler(filename='flash/guest-share/ztp.log',
-                                                       mode='a', maxBytes=5 * 1024 * 1024,
-                                                       backupCount=10, encoding=None, delay=0)
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
-        self.ztp_log.addHandler(handler)
-        '''
-
-        return self.ztp_log
-
-    # SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
-    def eem_action_syslog(self, message, priority='6'):
-        # trigger a SYSLOG message to the IOS-XE logger
-        # transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
-        new_msg = message.replace('"', '~')
-        new_msg = new_msg.replace("'", "~")
-        new_msg = new_msg.replace("\n", "; ")
-        eem_commands = ['event manager applet eem_action_syslog',
-                        'event none maxrun 600',
-                        'action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, new_msg, 'ZTP')]
-        # do not call do_configure().. call configure() directly .. otherwise will get loop
-        configure(eem_commands)
-        # do not call do_cli().. call cli() directly .. otherwise will get loop
-        cli('event manager run eem_action_syslog')
-        eem_commands = ['no event manager applet eem_action_syslog']
-        # do not call do_configure().. call configure() directly .. otherwise will get loop
-        configure(eem_commands)
-
+        if xfer_servers:
+            for srv in xfer_servers:
+                if srv.xfer_mode == 'syslog':
+                    self.ztp_log.debug('adding ZTP syslog servers')
+                    if isinstance(srv.hostname, str): self.do_configure('logging host %s' % srv.hostname)
+                    if isinstance(srv.hostname, list):
+                        for i in srv.hostname: self.do_configure('logging host %s' % i)
+                if srv.xfer_mode == 'ntp':
+                    self.ztp_log.debug('adding ZTP ntp servers')
+                    if isinstance(srv.hostname, str): self.do_configure('ntp server %s' % srv.hostname)
+                    if isinstance(srv.hostname, list):
+                        for i in srv.hostname: self.do_configure('ntp server %s' % i)
+        return xfer_servers
 
 if __name__ == "__main__":
     main()

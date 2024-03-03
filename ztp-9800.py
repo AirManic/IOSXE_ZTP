@@ -3,6 +3,7 @@
 
 # Importing cli module
 from cli import cli, clip, configure, configurep, execute, executep
+import configparser
 import json
 import re
 from collections import namedtuple
@@ -48,18 +49,23 @@ self.ztp_log.info('current version is %s' % self.version_cur)
 def main():
     try:
 
+        # create a device so can start to call logger aspects
+        configure_logger()
+
+        # schedule a reload in case something goes wrong
         # schedule a reload in case something goes wrong
         cli('reload in 60 reason IOSXEDevice.main@ primary watchdog')
 
-        # create a device so can start to call logger aspects
         # calling it "self".. so it sort of looks and acts a lot like the Class behavior
+        # this Class object does a large part of the effort as it figures out
+        # most of the details of the device and fetches the needful support file
         self = IOSXEDevice()
 
         self.ztp_log.info('START')
-        self.ztp_log.debug('This device is model % and serial %s' % (self.model, self.serial))
+        self.ztp_log.info('This device is model % and serial %s' % (self.model, self.serial))
 
         # config_basic_access() so can SSH to the DHCP address assigned
-        self.configure_basic_access()
+        self.configure_basic_access(self.basic_access_commands)
 
         self.version_tar_map = {
             'img': self.ztp_script._replace(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
@@ -112,7 +118,7 @@ def main():
         self.check_and_change_chassis(chassis_cur=self.chassis_cur, chassis_tar=self.chassis_tar)
 
         self.ztp_log.info('Day0 configuration push')
-        self.configure_merge()
+        self.configure_merge(filename=self.device_config_file.filename)
         timeout_pause = 120
         self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
         time.sleep(timeout_pause)
@@ -243,11 +249,9 @@ class IOSXEDevice(dict):
         create device attributes by extracting off of device
         '''
         super().__init__()
-        self.ztp_log = configure_logger()
+        self.ztp_log = get_logger()
         # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # only for develop cycling
-        if code_debugging: self.do_cli('reload in 20 reason IOSXEDevice.__init__@ development cycling')
 
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
@@ -278,25 +282,51 @@ class IOSXEDevice(dict):
         # now load the contents for processing here
         self.device_config_file_contents = self.do_cli('enable ; more flash:%s' % self.device_config_file.filename)
 
-        # extract the basic access commands
-        self.basic_access_commands = self.get_basic_access_commands(seed_file_contents=self.device_seed_file_contents)
+        # revisit the xfer_servers, so we can override them if there is device specific version
+        self.xfer_servers = None
+        results_device_seed = self.extract_default_xfer_servers(ini_file_contents=self.device_seed_file_contents)
+        results_ztp_seed = self.extract_default_xfer_servers(ini_file_contents=self.ztp_seed_defaults_contents)
+        if results_device_seed:
+            self.xfer_servers = results_device_seed
+        else:
+            self.xfer_servers = results_ztp_seed
+
+        # extract the basic access commands .. use the device specific if exist, else fall back to ztp default
+        self.basic_access_commands = None
+        results_device_seed = self.extract_basic_access_commands(ini_file_contents=self.device_seed_file_contents,
+                                                                 sec='basic_access_commands', key='commands')
+        results_ztp_seed = self.extract_basic_access_commands(ini_file_contents=self.ztp_seed_defaults_contents,
+                                                              sec='basic_access_commands', key='commands')
+        if results_device_seed:
+            self.basic_access_commands = results_device_seed
+        elif results_ztp_seed:
+            self.basic_access_commands = results_ztp_seed
 
         # chassis_priority aspects
         self.chassis_cur = self.get_chassis_cur()
         self.chassis_tar = self.extract_chassis_tar(config_file_contents=self.device_config_file_contents)
 
-        # TODO: figure out software mapping.. from global default, import from global filename, import from device
-        #  specific config
-        self.software_map = self.fetch_default_software_map()
+        # extract the software_map .. use the device specific if exist, else fall back to ztp default
+        self.software_map = None
+        results_device_seed = self.extract_software_map(ini_file_contents=self.device_seed_file_contents)
+        results_ztp_seed = self.extract_software_map(ini_file_contents=self.ztp_seed_defaults_contents)
+        if results_device_seed:
+            self.software_map = results_device_seed
+        elif results_ztp_seed:
+            self.software_map = results_ztp_seed
+
+        # TODO: version_tar_map
+        self.version_tar_map = None
         self.version_tar = self.get_version_tar()
         # load this with the respective part of the software_table from the software_map
         self.version_tar_map = {
             'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
                                              md5='70d8a8c0009fc862349a200fd62a0244'),
         }
-        self.version_tar_map = None
 
         self.upgrade_required = self.check_upgrade_required(self.version_cur, self.version_tar)
+
+
 
     def get_ztp_script(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -461,100 +491,56 @@ class IOSXEDevice(dict):
         # if did not do a change and reload, return True to indicate all is good
         return True
 
-    def fetch_default_software_map(self):
+    def extract_ini_section_key(self, ini_file_contents: str = None,
+                                sec: str = None, sec_partial: bool = False,
+                                key: str = None):
+        """
+        returns
+            - if both sec and key are specified, return sec/key else None
+            - if only section is specified and sec_partial is False return True if the sec is found else False
+            - if only section is specified and sec_partial is True return section names that are partial match else None
+
+        :param ini_file_contents:
+        :param sec:
+        :param sec_partial:
+        :param key:
+        :return:
+        """
+        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        results = None
+        if not ini_file_contents: return False
+        try:
+            config = configparser.ConfigParser()
+            config.sections()
+            if code_debugging: self.ztp_log.info('here are the sections %s' % config.sections())
+            config.read_string(ini_file_contents)
+            if sec and key and sec in config and key in config[sec]:
+                results = config[sec][key]
+                self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
+            elif sec and key and sec in config and key not in config[sec]:
+                results = None
+                self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
+            elif sec and not key and not sec_partial and sec in config:
+                results = sec in config
+                self.ztp_log.info('found section=%s %s' % (sec, results))
+            elif sec and not key and sec_partial:
+                # TODO: looking for partial match
+                results = None
+                self.ztp_log.info('found section=%s %s' % (sec, results))
+        except Exception as e:
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+            print(e)
+        return results
+
+    def extract_software_map(self, ini_file_contents: str = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: fetch these things from an ini filename from the server
         # TODO: when extracting ... for path, if honor leading '/', else build path as inheritance down hierarchy starting with ztp-script as starting point
-        software_map = {
-            'C9800-80': {
-                'version_tar': '17.13.01',
-                'software_table': {
-                    '17,13.01': {
-                        'img': TransferInfo_tuple_create(filename='C9800-80-universalk9_wlc.17.13.01.SPA.bin',
-                                                         md5='35b30f64fca28112ab903733a44acde0'),
-                    },
-                    '17.09.04a': {
-                        'img': TransferInfo_tuple_create(filename='C9800-80-universalk9_wlc.17.09.04a.SPA.bin',
-                                                         md5='9d7e3c491ef1903b51b2e4067522a1f8'),
-                    },
-                },
-            },
-            'C9800-40': {
-                'version_tar': '17.13.01',
-                'software_table': {
-                    '17.13.01': {
-                        'img': TransferInfo_tuple_create(filename='9800-40-universalk9_wlc.17.13.01.SPA.bin',
-                                                         md5='35b30f64fca28112ab903733a44acde0'),
-                    },
-                    '17.09.04a': {
-                        'img': TransferInfo_tuple_create(filename='C9800-40-universalk9_wlc.17.09.04a.SPA.bin',
-                                                         md5='9d7e3c491ef1903b51b2e4067522a1f8'),
-                    },
-                },
-            },
-            'C9800-L': {
-                'version_tar': '17.13.01',
-                'software_table': {
-                    '17.13.01': {
-                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
-                                                         md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
-                    },
-                    '17.09.04a': {
-                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                                         md5='70d8a8c0009fc862349a200fd62a0244'),
-                    },
-                    '17.03.04': {
-                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
-                                                         md5='c92d08d632d23940d03dea0bbf4d5ab5'),
-                        'APDP': TransferInfo_tuple_create(filename='',
-                                                          md5=''),
-                        'SMU': TransferInfo_tuple_create(filename='',
-                                                         md5=''),
-                        'APSP': [
-                            TransferInfo_tuple_create(filename='',
-                                                      md5=''),
-                            TransferInfo_tuple_create(filename='',
-                                                      md5=''),
-                        ],
-                        'WEB': TransferInfo_tuple_create(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
-                                                         md5='d9bebd6f10c8b66485a6910eb6113f6c'),
-                    },
-                },
-            },
-            'C9800-L-C-K9': {
-                'version_tar': '17.13.01',
-                'software_table': {
-                    '17.13.01': {
-                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.13.01.SPA.bin',
-                                                         md5='c425f5ae2ceb71db330e8dbc17edc3a8'),
-                    },
-                    '17.09.04a': {
-                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                                         md5='70d8a8c0009fc862349a200fd62a0244'),
-                    },
-                    '17.03.04': {
-                        'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.03.04.SPA.bin',
-                                                         md5='c92d08d632d23940d03dea0bbf4d5ab5'),
-                        'APDP': TransferInfo_tuple_create(filename='',
-                                                          md5=''),
-                        'SMU': TransferInfo_tuple_create(filename='',
-                                                         md5=''),
-                        'APSP': [
-                            TransferInfo_tuple_create(filename='',
-                                                      md5=''),
-                            TransferInfo_tuple_create(filename='',
-                                                      md5=''),
-                        ],
-                        'WEB': TransferInfo_tuple_create(filename='WLC_WEBAUTH_BUNDLE_1.0.zip',
-                                                         md5='d9bebd6f10c8b66485a6910eb6113f6c'),
-                    },
-                },
-            },
-            'C9800-CL': {
-                # does not support IOX and guestshell
-                'version_tar': None,
-            },
-        }
+        software_map = None
+        results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
+                                               sec='software_map', sec_partial=True)
+        if results:
+            software_map = results
         if code_debugging: self.ztp_log.debug('returning %s' % software_map)
         return software_map
 
@@ -569,14 +555,16 @@ class IOSXEDevice(dict):
         self.ztp_log.info('returning %s' % version_tar)
         return version_tar
 
-    def get_basic_access_commands(self, seed_file_contents: str = None):
+    def extract_basic_access_commands(self, ini_file_contents: str = None, sec: str = None, key: str = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         commands = None
-        if seed_file_contents:
-            pass
-            commands = 'something from ini filename'
-            # TODO: replace username with information from device_seed_file
-            # extract the basic access commands
+        try:
+            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, sec=sec, key=key)
+            if results:
+                commands = results
+        except e as Exception:
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+            print(e)
         if code_debugging: self.ztp_log.debug('returning %s' % commands)
         return commands
 
@@ -591,13 +579,16 @@ class IOSXEDevice(dict):
         self.do_cli('configure replace %s%s force' % ('flash:', self.device_config_file.filename))
         # TODO: sdiff to check if changes took effect
 
-    def configure_merge(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        self.do_cli('copy %s%s running-config' % ('flash:', self.device_config_file.filename))
+    def configure_merge(self, filename: str = None, filesys: str = 'flash:'):
+        self.ztp_log.info('called from %s()@%s with (filename=%s, filesys=%s)' % (
+            inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
+        if filename:
+            self.do_cli('copy %s%s running-config' % (filesys, filename))
         # TODO: sdiff to check if changes took effect
 
     def check_file_exists(self, filename: str = None, filesys='flash:/'):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.info('called from %s()@%s with (filename=%s, filesys=%s)' % (
+            inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         dir_check = 'dir ' + filesys + filename
         results = self.do_cli(dir_check)
         if 'No such filename or directory' in results:
@@ -719,11 +710,11 @@ class IOSXEDevice(dict):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         self.ztp_log.info(
             'Code Version Current is %s and Code Version Target is %s' % (version_cur, version_tar))
-        result = None
+        results = None
         if version_cur and version_tar:
-            result = version_cur == version_tar
-        self.ztp_log.info('returning %s' % result)
-        return result
+            results = version_cur == version_tar
+        self.ztp_log.info('returning %s' % results)
+        return results
 
     def verify_dst_image_md5(self, src_md5: str = None, filesys='flash:/', filename: str = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))

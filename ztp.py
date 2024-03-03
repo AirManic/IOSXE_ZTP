@@ -54,13 +54,13 @@ def main():
         log_info('**** Checking if upgrade is required or not ***** \n')
         update_status, current_version = upgrade_required(software_version)
         if update_status:
-            #check if image transfer needed
+            #check if filename transfer needed
             if check_file_exists(software_image):
               print(current_version)
               if current_version[0:5] not in release_set:
                 if not verify_dst_image_md5(software_image, software_md5_checksum):
-                    print ('*** Attempting to transfer image to switch.. ***')
-                    log_info('*** Attempting to transfer image to switch.. ***')
+                    print ('*** Attempting to transfer filename to switch.. ***')
+                    log_info('*** Attempting to transfer filename to switch.. ***')
                     file_transfer(http_server, software_image)
                     if not verify_dst_image_md5(software_image, software_md5_checksum):
                         log_critical('*** Failed Xfer mds hash mismatch ***')
@@ -94,14 +94,14 @@ def main():
         cli('event manager run cleanup')
         time.sleep(30)
 
-    #print config file name to download
+    #print config filename name to download
         config_file = '%s.cfg' % model
-        print('**** Downloading config file ****\n')
-        log_info('**** Downloading config file ****\n')
+        print('**** Downloading config filename ****\n')
+        log_info('**** Downloading config filename ****\n')
         file_transfer(http_server, config_file)
         print ('*** Trying to perform  Day 0 configuration push  **** \n')
         log_info('*** Trying to perform  Day 0 configuration push  **** \n')
-        #configure_replace(config_file)
+        #configure_replace(device_config_file)
         configure_merge(config_file)
         configure('crypto key generate rsa modulus 4096')
         print ('######  END OF ZTP SCRIPT ######\n')
@@ -122,8 +122,8 @@ def configure_replace(file,file_system='flash:/' ):
         time.sleep(120)
     
 def configure_merge(file,file_system='flash:/'):
-     print("************************Merging running config with given config file************************\n")
-     log_info('************************Merging running config with given config file************************\n')
+     print("************************Merging running config with given config filename************************\n")
+     log_info('************************Merging running config with given config filename************************\n')
      config_command = 'copy %s%s running-config' %(file_system,file)
      config_repl = executep(config_command)
      time.sleep(120)
@@ -133,7 +133,7 @@ def check_file_exists(file, file_system='flash:/'):
     print ('*** Checking to see if %s exists on %s ***' % (file, file_system))
     log_info('*** Checking to see if %s exists on %s ***' % (file, file_system))
     results = cli(dir_check)
-    if 'No such file or directory' in results:
+    if 'No such filename or directory' in results:
         print ('*** The %s does NOT exist on %s ***' % (file, file_system))
         log_info('*** The %s does NOT exist on %s ***' % (file, file_system))
         return False
@@ -164,7 +164,7 @@ def deploy_eem_cleanup_script():
     log_info('*** Successfully configured cleanup EEM script on device! ***')
 
 def deploy_eem_upgrade_script(image):
-    install_command = 'install add file flash://' + image + ' activate commit'
+    install_command = 'install add filename flash://' + image + ' activate commit'
     eem_commands = ['event manager applet upgrade',
                     'event none maxrun 600',
                     'action 1.0 cli command "enable"',
@@ -177,14 +177,14 @@ def deploy_eem_upgrade_script(image):
     log_info('*** Successfully configured upgrade EEM script on device! ***')
 
 def file_transfer(http_server, file):
-  print('**** Start transferring  file *******\n')
-  log_info('**** Start transferring  file *******\n')
+  print('**** Start transferring  filename *******\n')
+  log_info('**** Start transferring  filename *******\n')
   res = cli('copy http://%s/%s flash:%s' % (http_server,file,file))
   print(res)
   log_info(res)
   print("\n")
-  print('**** Finished transferring device configuration file *******\n')
-  log_info('**** Finished transferring device configuration file *******\n')
+  print('**** Finished transferring device configuration filename *******\n')
+  log_info('**** Finished transferring device configuration filename *******\n')
 
 def find_certs():
     certs = cli('show run | include crypto pki')
@@ -271,7 +271,7 @@ def verify_dst_image_md5(image, src_md5, file_system='flash:/'):
        log_info('****  MD5 checksum failed due to an exception  *****')
        log_info(e)
        return True
-        #output = subprocess.Popen(['md5sum', '/flash/'+image],stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        #output = subprocess.Popen(['md5sum', '/flash/'+filename],stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         #stdout_data, stderr_data = output.communicate()
         #output.wait() 
         #outputdata = (stdout_data.decode('utf-8')).split()
@@ -283,31 +283,31 @@ def verify_dst_image_md5(image, src_md5, file_system='flash:/'):
     
 def create_logfile():
     try:
-        print ("******** Creating  a persistent log file *********** ")
+        print ("******** Creating  a persistent log filename *********** ")
         path = '/flash/guest-share/ztp.log'
         #file_exists = os.path.isfile(path)
         #if(file_exists == False):
-          #print ("******** ztp.log file dont exist .  *********** ")
+          #print ("******** ztp.log filename dont exist .  *********** ")
         with open(path, 'a+') as fp:
              pass
         return path
     except IOError:
-      print("Couldnt create a log file at guset-share .Trying to use  /flash/ztp.log as an alternate log path")
+      print("Couldnt create a log filename at guset-share .Trying to use  /flash/ztp.log as an alternate log path")
       path = '/flash/ztp.log'
       #file_exists = os.path.isfile(path)
       #if(file_exists == False):
-      #    print ("******** ztp.log file dont exist .  *********** ")
+      #    print ("******** ztp.log filename dont exist .  *********** ")
       with open(path, 'a+') as fp:
              pass
       return path
     except Exception as e:
-         print("Couldnt create a log file to proceed")
+         print("Couldnt create a log filename to proceed")
 
 
 def configure_logger(path):
     log_formatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
     logFile = path
-    #create a new file > 5 mb size
+    #create a new filename > 5 mb size
     log_handler = RotatingFileHandler(logFile, mode='a', maxBytes=5*1024*1024, backupCount=10, encoding=None, delay=0)
     log_handler.setFormatter(log_formatter)
     log_handler.setLevel(logging.INFO)

@@ -61,7 +61,7 @@ def main():
         self = IOSXEDevice()
 
         self.ztp_log.info('START')
-        self.ztp_log.info('This device is model % and serial %s' % (self.model, self.serial))
+        self.ztp_log.info('This device is model %s and serial %s' % (self.model, self.serial))
 
         # config_basic_access() so can SSH to the DHCP address assigned
         self.do_configure(self.basic_access_commands)
@@ -196,7 +196,6 @@ def configure_logger(logger_name='ZTP'):
     ztp_log.addFilter(do_guestshell_syslog)
     if code_debugging:
         configure('logging trap debugging')
-        configure('logging buffered 1000000')
         ztp_log.info('configured logging trap debugging')
 
     # TODO .. see if this can be fixed
@@ -258,6 +257,10 @@ class IOSXEDevice(dict):
 
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
+        # only after get_ztp_script .. logging buffered clears the log.. and breaks finding the "PNP" log message
+        if code_debugging: configure('logging buffered 200000000')
+
+        # get the overall defaults
         self.ztp_seed_defaults_file = self.file_transfer(self.ztp_script._replace(filename='ztp-seed-defaults.ini'))
         self.ztp_seed_defaults_contents = self.do_cli('more flash:%s' % self.ztp_seed_defaults_file.filename)
 
@@ -335,11 +338,13 @@ class IOSXEDevice(dict):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         ztp_script = TransferInfo_tuple_create()
         show_log = self.do_cli('show logging | inc PNP-6-PNP_SCRIPT_STARTED')
+        if code_debugging: self.ztp_log.debug('show_log is %s' % show_log)
         try:
             '''
             %PNP-6-PNP_SCRIPT_STARTED: Script (http://192.168.201.68/ztp/ztp-9800.py)
             '''
-            results = re.search(r"%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)", show_log)
+            results = re.search(pattern="%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)",
+                                string=show_log)
             if results:
                 ztp_script = ztp_script._replace(xfer_mode=results.group(1),
                                                  hostname=results.group(2),
@@ -664,7 +669,7 @@ class IOSXEDevice(dict):
                        ' ' + filesys + filename)
 
             try:
-                self.do_cli('enable; %s ; %s' % (command_delete, command))
+                self.do_cli('%s ; %s' % (command_delete, command))
             except e as Exception:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)

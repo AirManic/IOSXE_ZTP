@@ -141,8 +141,10 @@ def configure_logger(logger_name='ZTP'):
         eem_commands = ['no event manager applet eem_action_syslog',
                         'event manager applet eem_action_syslog',
                         'event none maxrun 600', ]
+        i = 100
         for line in new_msg:
-            eem_commands.append('action 1.0 syslog priority %s msg \"%s\" facility %s' % (priority, line, 'ZTP'))
+            i = i + 1
+            eem_commands.append('action %03d syslog priority %s msg \"%s\" facility %s' % (i, priority, line[:40], 'ZTP'))
         # do not call do_configure().. call configure() directly .. otherwise will get loop
         configure(eem_commands)
         # do not call do_cli().. call cli() directly .. otherwise will get loop
@@ -652,11 +654,11 @@ class IOSXEDevice(dict):
             command_delete = 'delete ' + filesys + filename
             command = ('copy ' + xfer_mode + username + password + hostname + port + path + filename +
                        ' ' + filesys + filename)
-            command_set = (command_delete, command)
+            command_set = command_delete + ' ; ' + command
 
             try:
-                self.ztp_log.info('CLI %s'% command_set)
-                self.do_cli('%s ; %s' % command_set)
+                self.ztp_log.info('CLI %s' % command_set)
+                self.do_cli('%s' % command_set)
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
@@ -740,7 +742,7 @@ class IOSXEDevice(dict):
         xfer_servers = None
         if ini_file_contents:
             pass
-            self.ztp_log.info('contents are \n%s' % ini_file_contents)
+            self.ztp_log.debug('contents are \n%s' % ini_file_contents)
             # TODO: extract from filename as xfer_servers list
         if not xfer_servers:
             xfer_servers = [

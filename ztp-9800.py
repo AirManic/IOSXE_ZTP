@@ -53,7 +53,6 @@ def main():
         configure_logger()
 
         # schedule a reload in case something goes wrong
-        # schedule a reload in case something goes wrong
         cli('enable ; reload in 60 reason IOSXEDevice.main@ primary watchdog')
 
         # calling it "self".. so it sort of looks and acts a lot like the Class behavior
@@ -252,6 +251,7 @@ class IOSXEDevice(dict):
         create device attributes by extracting off of device
         '''
         super().__init__()
+
         self.ztp_log = get_logger()
         # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))

@@ -326,14 +326,15 @@ class IOSXEDevice(dict):
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
         # not really sending back list, but putting list wrapper to let it do %s
-        self.ztp_log.info('returning %s' % [ztp_script])
+        self.ztp_log.debug('returning %s' % [ztp_script])
         return ztp_script
 
     def get_show_version(self):
         self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.info('CLI show version')
         show_version = self.do_cli('show version')
         if code_debugging: self.ztp_log.debug('found show_version \n%s' % show_version)
-        self.ztp_log.info('returning \n%s' % show_version)
+        self.ztp_log.debug('returning \n%s' % show_version)
         return show_version
 
     def get_model(self, show_version: str = None):
@@ -345,7 +346,7 @@ class IOSXEDevice(dict):
             except AttributeError:
                 model = re.search(pattern="cisco\s(\w+-.*?)\s", string=show_version).group(1)
             self.ztp_log.info('found model %s' % model)
-        self.ztp_log.info('returning %s' % model)
+        self.ztp_log.debug('returning %s' % model)
         return model
 
     def get_serial(self, show_version: str = None):
@@ -357,7 +358,7 @@ class IOSXEDevice(dict):
             except AttributeError:
                 serial = re.search(pattern="Processor board ID\s+(\S+)", string=show_version).group(1)
             self.ztp_log.info('found serial %s' % serial)
-        self.ztp_log.info('returning %s' % serial)
+        self.ztp_log.debug('returning %s' % serial)
         return serial
 
     def get_version_cur(self, show_version: str = None):
@@ -372,7 +373,7 @@ class IOSXEDevice(dict):
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
-        self.ztp_log.info('returning %s' % version_cur)
+        self.ztp_log.debug('returning %s' % version_cur)
         return version_cur
 
     def get_version_cur_mode(self, show_version: str = None):
@@ -387,31 +388,34 @@ class IOSXEDevice(dict):
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
-        self.ztp_log.info('returning %s' % version_cur_mode)
+        self.ztp_log.debug('returning %s' % version_cur_mode)
         return version_cur_mode
 
     def get_device_seed_filename(self, serial: str = None, model: str = None,
                                  script: TransferInfo_tuple = TransferInfo_tuple_create()):
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s with (model=%s, script=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], model, script))
         transferit = TransferInfo_tuple_create()
-        if script and serial:
+        if script and serial and model:
             transferit = script
-            # change the filename to the seed.yml filename
             transferit = transferit._replace(filename='ztp-seed-%s-%s.ini' % (model, serial))
-            # not really sending back list, but putting list wrapper to let it do %s
-        self.ztp_log.info('returning %s' % [transferit])
+        # not really sending back list, but putting list wrapper to let it do %s
+        self.ztp_log.info('is %s' % [transferit])
+        self.ztp_log.debug('returning %s' % [transferit])
         return transferit
 
     def get_device_config_filename(self, serial: str = None, model: str = None,
                                    script: TransferInfo_tuple = TransferInfo_tuple_create()):
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # start with same place the script came from
-        transferit = script
-        # change filename to the cfg filename
-        transferit = transferit._replace(filename='%s-%s.cfg' % (model, serial))
+        self.ztp_log.debug('called from %s()@%s with (serial=%s, script=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], serial, script))
+        transferit = TransferInfo_tuple_create()
+        if script and serial and model:
+            transferit = script
+            transferit = transferit._replace(filename='%s-%s.cfg' % (model, serial))
         # TODO: extract a more preferred filename .. and transferit definition
         # not really sending back list, but putting list wrapper to let it do %s
-        self.ztp_log.info('returning %s' % [transferit])
+        self.ztp_log.info('is %s' % [transferit])
+        self.ztp_log.debug('returning %s' % [transferit])
         return transferit
 
     def get_chassis_cur(self):
@@ -421,35 +425,39 @@ class IOSXEDevice(dict):
         '''
         *1       Active   f4bd.9e56.fa80     1      V02     Ready                0.0.0.0        
         '''
-        try:
-            results = re.search(r"\*(\d)\s+(\S+)\s+([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})\s+(\d)",
-                                show_chassis)
-            if results:
-                chassis = chassis_tuple(chassis_num=results.group(1), chassis_pri=results.group(4))
-                self.ztp_log.info('found %s' % [chassis])
-        except Exception as e:
-            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-            print(e)
-        self.ztp_log.info('returning s' % [chassis])
+        if True:
+            try:
+                results = re.search(r"\*(\d)\s+(\S+)\s+([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})\s+(\d)",
+                                    show_chassis)
+                if results:
+                    chassis = chassis_tuple(chassis_num=results.group(1), chassis_pri=results.group(4))
+                    self.ztp_log.info('found %s' % [chassis])
+            except Exception as e:
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+                print(e)
+        self.ztp_log.debug('returning s' % [chassis])
         return chassis
 
     def extract_chassis_tar(self, config_file_contents: str = None):
         self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         chassis = None
         if config_file_contents:
-            pass
-            # TODO: extract chassis_priority from desired config filename interpolation
-
-        chassis = chassis_tuple(chassis_num='2', chassis_pri='2')
-        self.ztp_log.info('returning %s' % [chassis])
+            try:
+                # TODO: extract chassis_priority from desired config filename interpolation
+                results = True
+                if results:
+                    chassis = chassis_tuple(chassis_num='2', chassis_pri='2')
+                    self.ztp_log.info('found %s' % [chassis])
+            except Exception as e:
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+                print(e)
+        self.ztp_log.debug('returning %s' % [chassis])
         return chassis
 
     def check_and_change_chassis(self, chassis_cur: chassis_tuple = None, chassis_tar: chassis_tuple = None):
         self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         if chassis_cur and chassis_tar:
-
             do_reload = False
-
             if chassis_cur.chassis_pri != chassis_tar.chassis_pri:
                 # changing priority should not trigger a reboot
                 self.ztp_log.info('chassis priority needs to be changed from %s to %s' %
@@ -457,7 +465,6 @@ class IOSXEDevice(dict):
                 self.do_cli('chassis %s priority %s' %
                             (chassis_cur.chassis_num, chassis_tar.chassis_pri))
                 do_reload = True
-
             elif chassis_cur.chassis_num != chassis_tar.chassis_num:
                 # changing chassis number, should automatically trigger a reboot
                 self.ztp_log.info('chassis number needs to be changed from %s to %s' %
@@ -465,7 +472,6 @@ class IOSXEDevice(dict):
                 self.do_cli('chassis %s renumber %s' %
                             (chassis_cur.chassis_num, chassis_tar.chassis_num))
                 do_reload = True
-
             if do_reload:
                 self.do_cli('reload in 1 reason check_and_change_chassis() do_reload')
                 timeout_pause = 180
@@ -473,9 +479,8 @@ class IOSXEDevice(dict):
                     'pausing %s seconds to let check_and_change_chassis@ number from %s to %s trigger a reload' %
                     (timeout_pause, chassis_cur.chassis_num, chassis_tar.chassis_num))
                 time.sleep(timeout_pause)
-
         # if did not do a change and reload, return True to indicate all is good
-        self.ztp_log.info('returning %s' % True)
+        self.ztp_log.debug('returning %s' % True)
         return True
 
     def extract_ini_section_key(self, ini_file_contents: str = None,
@@ -493,7 +498,8 @@ class IOSXEDevice(dict):
         :param key:
         :return:
         """
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s with (sec=%s, sec_partial=%s, key=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], sec, sec_partial, key))
         results = None
         if ini_file_contents:
             try:
@@ -519,7 +525,7 @@ class IOSXEDevice(dict):
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
-        if code_debugging: self.ztp_log.debug('returning %s' % results)
+        self.ztp_log.debug('returning %s' % results)
         return results
 
     def extract_software_map(self, ini_file_contents: str = None):
@@ -546,20 +552,31 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO process tables to yield serial, software, global pecking order
         version_tar = None
-        self.ztp_log.info('returning %s' % version_tar)
+        self.ztp_log.info('is %s' % version_tar)
+        self.ztp_log.debug('returning %s' % version_tar)
         return version_tar
 
-    def configure_replace(self):
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        self.do_cli('configure replace %s%s force' % ('flash:', self.device_config_file.filename))
-        # TODO: sdiff to check if changes took effect
+    def configure_replace(self, filename: str = None, filesys: str = 'flash:'):
+        self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
+            inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
+        results = None
+        if filename:
+            self.do_cli('configure replace %s%s force' % (filesys, filename))
+            # TODO: sdiff to check if changes took effect
+        self.ztp_log.info('is %s' % results)
+        self.ztp_log.debug('returning %s' % results)
+        return results
 
     def configure_merge(self, filename: str = None, filesys: str = 'flash:'):
         self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
+        results = None
         if filename:
             self.do_cli('copy %s%s running-config' % (filesys, filename))
-        # TODO: sdiff to check if changes took effect
+            # TODO: sdiff to check if changes took effect
+        self.ztp_log.info('is %s' % results)
+        self.ztp_log.debug('returning %s' % results)
+        return results
 
     def check_file_exists(self, filename: str = None, filesys='flash:/'):
         self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (

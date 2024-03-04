@@ -47,8 +47,8 @@ self.ztp_log.info('current version is %s' % self.version_cur)
 
 
 def main():
-    try:
 
+    try:
         # create a device so can start to call logger aspects
         configure_logger()
 
@@ -63,7 +63,7 @@ def main():
         self.ztp_log.info('START')
         self.ztp_log.info('This device is model %s and serial %s' % (self.model, self.serial))
 
-        # config_basic_access() so can SSH to the DHCP address assigned
+        # do some basic config for things like SSH/etc
         self.do_configure(self.basic_access_commands)
 
         self.version_tar_map = {
@@ -83,8 +83,8 @@ def main():
                         if code_debugging: self.do_cli('reload in 30 reason main@ file_transfer %s' % [transferit])
                         self.file_transfer(transferit)
                     elif not self.verify_dst_image_md5(filename=entry.filename, src_md5=entry.md5):
-                        self.ztp_log.info('failed Xfer filename does not exist')
-                        raise ValueError('Failed Xfer')
+                        self.ztp_log.info('FailedXfer filename does not exist')
+                        raise ValueError('FailedXfer')
 
                     # TODO: look for INSTALL vs BUNDLE mode from software_map table and flip if/where needed
                     self.deploy_eem_upgrade_script(app_label='upgrade', filename=self.entry.filename)
@@ -126,14 +126,20 @@ def main():
 
         # regenerate the local rsa key for ssh/etc
         self.do_configure('crypto key generate rsa modulus 4096')
-        self.ztp_log.info('END')
+
+        # stage the cleanup routine so can SSH to the DHCP address assigned
+        self.do_configure(self.basic_access_commands_cleanup)
+
+        # whew.... finally done :) :)
+        self.ztp_log.info('THE END')
 
     except Exception as e:
-        self.ztp_log.critical('aborting. failure encountered during day 0 provisioning. error details below')
-        self.ztp_log.debug('an error occurred: %s' % type(e).__name__)
+        ztp_log = get_logger()
+        ztp_log.critical('aborting. failure encountered during day 0 provisioning. error details below')
+        ztp_log.debug('an error occurred: %s' % type(e).__name__)
         print(e)
         cli('enable ; show logging | inc ZTP')
-        sys.exit(e)
+        sys.exit(1)
 
 
 def configure_logger(logger_name='ZTP'):
@@ -148,7 +154,7 @@ def configure_logger(logger_name='ZTP'):
         logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
     ztp_log.addHandler(handler)
 
-    ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+    ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
     ztp_log.info('logger %s created' % ztp_log)
 
     def eem_action_syslog(message, priority='6'):
@@ -157,8 +163,6 @@ def configure_logger(logger_name='ZTP'):
         # TODO: see if escape or literal syntax works for double and single quotes
         new_msg = message.replace('"', '~')
         new_msg = new_msg.replace("'", "~")
-        # TODO: remove if not needed
-        # new_msg = new_msg.replace("\n", " ; ")
         new_msg = new_msg.splitlines()
         eem_commands = ['no event manager applet eem_action_syslog',
                         'event manager applet eem_action_syslog',
@@ -174,10 +178,7 @@ def configure_logger(logger_name='ZTP'):
         configure(eem_commands)
 
     def do_guestshell_syslog(record):
-        # TODO .. see if this can be fixed
-        # with open('/dev/ttyS3', 'w') as fd:
-        #   fd.write(record.getMessage())
-        # os.system('echo %s > /dev/ttyS3' % record.getMessage())
+
         try:
             # SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
             syslog_priority = '5'
@@ -200,14 +201,6 @@ def configure_logger(logger_name='ZTP'):
 
     # TODO .. see if this can be fixed
     '''
-    # Create SysLogHandler handler
-    handler = logging.handlers.SysLogHandler()
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s: %(funcName)s@%(lineno)d: %(message)s'))
-    ztp_log.addHandler(handler)
-    '''
-    # TODO .. see if this can be fixed
-    '''
     # create a new filename > 5 mb size
     handler = logging.handlers.RotatingFileHandler(filename='flash/guest-share/ztp.log',
                                                    mode='a', maxBytes=5 * 1024 * 1024,
@@ -221,7 +214,7 @@ def configure_logger(logger_name='ZTP'):
 
 def get_logger(logger_name='ZTP'):
     ztp_log = logging.getLogger(logger_name)
-    ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+    ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
     return ztp_log
 
 
@@ -235,8 +228,6 @@ chassis_tuple = namedtuple(typename='chassis', field_names='chassis_num chassis_
 def TransferInfo_tuple_create(**kwargs):
     transferit = TransferInfo_tuple(**TransferInfo_tuple_defaults)
     transferit = transferit._replace(**kwargs)
-    # TODO: clean up hostname, path and filename.
-    #  - trim whitespace .. and remove any leading & trailing '/'
     return transferit
 
 
@@ -253,7 +244,7 @@ class IOSXEDevice(dict):
 
         self.ztp_log = get_logger()
         # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
 
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
@@ -299,14 +290,25 @@ class IOSXEDevice(dict):
 
         # extract the basic access commands .. use the device specific if exist, else fall back to ztp default
         self.basic_access_commands = None
-        results_device_seed = self.extract_basic_access_commands(ini_file_contents=self.device_seed_file_contents,
-                                                                 sec='basic_access_commands', key='commands')
-        results_ztp_seed = self.extract_basic_access_commands(ini_file_contents=self.ztp_seed_defaults_contents,
-                                                              sec='basic_access_commands', key='commands')
+        results_device_seed = self.extract_ini_section_key(ini_file_contents=self.device_seed_file_contents,
+                                                           sec='basic_access_commands', key='commands')
+        results_ztp_seed = self.extract_ini_section_key(ini_file_contents=self.ztp_seed_defaults_contents,
+                                                        sec='basic_access_commands', key='commands')
         if results_device_seed:
             self.basic_access_commands = results_device_seed
         elif results_ztp_seed:
             self.basic_access_commands = results_ztp_seed
+
+        self.basic_access_commands_cleanup = None
+        results_device_seed = self.extract_ini_section_key(ini_file_contents=self.device_seed_file_contents,
+                                                           sec='basic_access_commands_cleanup', key='commands')
+        results_ztp_seed = self.extract_ini_section_key(ini_file_contents=self.ztp_seed_defaults_contents,
+                                                        sec='basic_access_commands_cleanup', key='commands')
+        if results_device_seed:
+            self.basic_access_commands_cleanup = results_device_seed
+        elif results_ztp_seed:
+            self.basic_access_commands_cleanup = results_ztp_seed
+
 
         # chassis_priority aspects
         self.chassis_cur = self.get_chassis_cur()
@@ -332,10 +334,8 @@ class IOSXEDevice(dict):
 
         self.upgrade_required = self.check_upgrade_required(self.version_cur, self.version_tar)
 
-
-
     def get_ztp_script(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         ztp_script = TransferInfo_tuple_create()
         show_log = self.do_cli('show logging | inc PNP-6-PNP_SCRIPT_STARTED')
         if code_debugging: self.ztp_log.debug('show_log is %s' % show_log)
@@ -359,14 +359,14 @@ class IOSXEDevice(dict):
         return ztp_script
 
     def get_show_version(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         show_version = self.do_cli('show version')
         if code_debugging: self.ztp_log.debug('found show_version \n%s' % show_version)
         self.ztp_log.info('returning \n%s' % show_version)
         return show_version
 
     def get_model(self, show_version: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         model = None
         if show_version:
             try:
@@ -378,7 +378,7 @@ class IOSXEDevice(dict):
         return model
 
     def get_serial(self, show_version: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         serial = None
         if show_version:
             try:
@@ -390,7 +390,7 @@ class IOSXEDevice(dict):
         return serial
 
     def get_version_cur(self, show_version: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         version_cur = None
         if show_version:
             try:
@@ -405,7 +405,7 @@ class IOSXEDevice(dict):
         return version_cur
 
     def get_version_cur_mode(self, show_version: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         version_cur_mode = None
         if show_version:
             try:
@@ -421,7 +421,7 @@ class IOSXEDevice(dict):
 
     def get_device_seed_filename(self, serial: str = None, model: str = None,
                                  script: TransferInfo_tuple = TransferInfo_tuple_create()):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         transferit = TransferInfo_tuple_create()
         if script and serial:
             transferit = script
@@ -433,7 +433,7 @@ class IOSXEDevice(dict):
 
     def get_device_config_filename(self, serial: str = None, model: str = None,
                                    script: TransferInfo_tuple = TransferInfo_tuple_create()):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # start with same place the script came from
         transferit = script
         # change filename to the cfg filename
@@ -444,7 +444,7 @@ class IOSXEDevice(dict):
         return transferit
 
     def get_chassis_cur(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         show_chassis = self.do_cli('show chassis')
         chassis = None
         '''
@@ -463,7 +463,7 @@ class IOSXEDevice(dict):
         return chassis
 
     def extract_chassis_tar(self, config_file_contents: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         chassis = None
         if config_file_contents:
             pass
@@ -474,7 +474,7 @@ class IOSXEDevice(dict):
         return chassis
 
     def check_and_change_chassis(self, chassis_cur: chassis_tuple = None, chassis_tar: chassis_tuple = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         if chassis_cur and chassis_tar:
 
             do_reload = False
@@ -522,7 +522,7 @@ class IOSXEDevice(dict):
         :param key:
         :return:
         """
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         results = None
         if ini_file_contents:
             try:
@@ -543,7 +543,7 @@ class IOSXEDevice(dict):
                     # TODO: looking for partial match
                     results = None
                     self.ztp_log.info('found section=%s %s' % (sec, results))
-            except configparser.MissingSectionHeaderError as e:
+            except configparser.MissingSectionHeaderError:
                 results = None
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
@@ -552,7 +552,7 @@ class IOSXEDevice(dict):
         return results
 
     def extract_software_map(self, ini_file_contents: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         # TODO: fetch these things from an ini filename from the server TODO: when extracting ... for path,
         #  if honor leading '/', else build path as inheritance down hierarchy starting
         #  with ztp-script as starting point
@@ -569,57 +569,46 @@ class IOSXEDevice(dict):
         determine best software target from per serial config filename, overall software_map, else overall target
         :return:
         '''
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO process tables to yeild serial, software, global pecking order
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        # TODO process tables to yield serial, software, global pecking order
         version_tar = None
         self.ztp_log.info('returning %s' % version_tar)
         return version_tar
 
-    def extract_basic_access_commands(self, ini_file_contents: str = None, sec: str = None, key: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        commands = None
-        try:
-            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, sec=sec, key=key)
-            if results:
-                commands = results
-        except e as Exception:
-            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-            print(e)
-        if code_debugging: self.ztp_log.debug('returning %s' % commands)
-        return commands
-
     def configure_replace(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         self.do_cli('configure replace %s%s force' % ('flash:', self.device_config_file.filename))
         # TODO: sdiff to check if changes took effect
 
     def configure_merge(self, filename: str = None, filesys: str = 'flash:'):
-        self.ztp_log.info('called from %s()@%s with (filename=%s, filesys=%s)' % (
+        self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         if filename:
             self.do_cli('copy %s%s running-config' % (filesys, filename))
         # TODO: sdiff to check if changes took effect
 
     def check_file_exists(self, filename: str = None, filesys='flash:/'):
-        self.ztp_log.info('called from %s()@%s with (filename=%s, filesys=%s)' % (
+        self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         dir_check = 'dir ' + filesys + filename
         results = self.do_cli(dir_check)
         if 'No such filename or directory' in results:
             self.ztp_log.warning('%s does NOT exist on %s' % (filename, filesys))
-            return False
+            results = False
         elif 'Directory of %s%s' % (filesys, filename) in results:
             self.ztp_log.info('%s does EXIST on %s' % (filename, filesys))
-            return True
+            results = True
         elif 'Directory of %s%s' % ('bootflash:/', filename) in results:
             self.ztp_log.info('%s does EXIST on %s' % (filename, 'bootflash:/'))
-            return True
+            results = True
         else:
-            self.ztp_log.error('Unexpected output')
-            raise ValueError("Unexpected output")
+            self.ztp_log.error('UnexpectedOutput')
+            raise ValueError('UnexpectedOutput')
+        self.ztp_log.info('returning %s' % results)
+        return results
 
     def deploy_eem_upgrade_script(self, app_label='upgrade', filesys='flash:/', filename: str = None):
-        self.ztp_log.info('called from %s()@%s with (filename=%s, app_label=%s)' % (
+        self.ztp_log.debug('called from %s()@%s with (filename=%s, app_label=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, app_label))
         if filename:
             install_command = 'install add filename ' + filesys + filename + ' activate commit'
@@ -634,7 +623,7 @@ class IOSXEDevice(dict):
             self.do_configure(eem_commands)
 
     def deploy_eem_remove_inactive_script(self, app_label='remove_inactive'):
-        self.ztp_log.info(
+        self.ztp_log.debug(
             'called from %s()@%s with (app_label=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], app_label))
         install_command = 'install remove inactive'
         eem_commands = ['no event manager applet %s' % app_label,
@@ -648,7 +637,7 @@ class IOSXEDevice(dict):
         self.do_configure(eem_commands)
 
     def file_transfer(self, transferit: TransferInfo_tuple = TransferInfo_tuple_create(), filesys='flash:/'):
-        self.ztp_log.info('called from %s()@%s with (%s)' % (
+        self.ztp_log.debug('called from %s()@%s with (transferit=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], transferit))
         if transferit.xfer_mode and transferit.hostname and transferit.filename:
 
@@ -670,7 +659,7 @@ class IOSXEDevice(dict):
 
             try:
                 self.do_cli('%s ; %s' % (command_delete, command))
-            except e as Exception:
+            except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
         # not really sending back list, but putting list wrapper to let it do %s
@@ -678,17 +667,17 @@ class IOSXEDevice(dict):
         return transferit
 
     def find_certs(self):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         certs = self.do_cli('show run | include crypto pki')
         if certs:
             certs_split = certs.splitlines()
             certs_split.remove('')
             for cert in certs_split:
-                command = 'no %s' % (cert)
+                command = 'no %s' % cert
                 self.do_configure(command)
 
     def do_cli(self, command: str = None):
-        self.ztp_log.info(
+        self.ztp_log.debug(
             'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
         try:
@@ -711,7 +700,7 @@ class IOSXEDevice(dict):
         return results
 
     def do_configure(self, command: Union[str, list]):
-        self.ztp_log.info(
+        self.ztp_log.debug(
             'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
         try:
@@ -720,10 +709,12 @@ class IOSXEDevice(dict):
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
             self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
+        # don't log results... as most of the results are long
         return results
 
     def check_upgrade_required(self, version_cur: str = None, version_tar: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s with (version_cur=%s, version_tar=%s)' %
+                          (inspect.stack()[1][3], inspect.stack()[1][2], version_cur, version_cur))
         self.ztp_log.info(
             'Code Version Current is %s and Code Version Target is %s' % (version_cur, version_tar))
         results = None
@@ -733,7 +724,8 @@ class IOSXEDevice(dict):
         return results
 
     def verify_dst_image_md5(self, src_md5: str = None, filesys='flash:/', filename: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s with (src_md5=%s, filesys=%s, filename=%s)' %
+                          (inspect.stack()[1][3], inspect.stack()[1][2], src_md5, filesys, filename))
         self.ztp_log.info('(src_md5=%s, filesys=%s, filename=%s)' % (src_md5, filesys, filename))
         verify_md5 = 'verify /md5 ' + filesys + filename
         if code_debugging: self.ztp_log.debug('%s' % verify_md5)
@@ -749,12 +741,11 @@ class IOSXEDevice(dict):
         except Exception as e:
             self.ztp_log.error('MD5 checksum failed due to an exception')
             print(e)
-            # TODO: To Be .. or Not To Be .. should this be kept here
-            self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
+            if code_debugging: self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
             return False
 
     def extract_default_xfer_servers(self, ini_file_contents: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         xfer_servers = None
         if ini_file_contents:
             pass
@@ -774,7 +765,8 @@ class IOSXEDevice(dict):
         return xfer_servers
 
     def configure_syslog_and_ntp(self, xfer_servers: list = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        self.ztp_log.debug('called from %s()@%s with (xfer_servers=%s)' %
+                          (inspect.stack()[1][3], inspect.stack()[1][2], xfer_servers))
         if xfer_servers:
             for srv in xfer_servers:
                 if srv.xfer_mode == 'syslog':

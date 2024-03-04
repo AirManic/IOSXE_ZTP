@@ -131,46 +131,48 @@ def configure_logger(logger_name='ZTP'):
     ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
     ztp_log.info('logger %s created' % ztp_log)
 
-    def eem_action_syslog(message, priority='6'):
-        # trigger a SYSLOG message to the IOS-XE logger
-        # transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
-        # TODO: see if escape or literal syntax works for double and single quotes
-        new_msg = message.replace('"', '~')
-        new_msg = new_msg.replace("'", "~")
-        new_msg = new_msg.splitlines()
-        eem_commands = ['no event manager applet eem_action_syslog',
-                        'event manager applet eem_action_syslog',
-                        'event none maxrun 600', ]
-        i = 100
-        for line in new_msg:
-            i = i + 1
-            eem_commands.append('action %03d syslog priority %s msg \"%s\" facility %s' % (i, priority, line[:40], 'ZTP'))
-        # do not call do_configure().. call configure() directly .. otherwise will get loop
-        configure(eem_commands)
-        # do not call do_cli().. call cli() directly .. otherwise will get loop
-        cli('enable ; event manager run eem_action_syslog')
-        eem_commands = ['no event manager applet eem_action_syslog']
-        # do not call do_configure().. call configure() directly .. otherwise will get loop
-        configure(eem_commands)
-
-    def do_guestshell_syslog(record):
-
-        try:
+    def eem_action_syslog(record: logging.LogRecord = None):
+        # trigger a SYSLOG to the IOS-XE logger
+        if record:
             # SYSLOG emergency/0, alert/1, critical/2, error/3, warning/4, notice/5, info/6, debug/7
-            syslog_priority = '5'
-            if record.levelname == 'DEBUG': syslog_priority = '7'
-            if record.levelname == 'INFO': syslog_priority = '6'
-            if record.levelname == 'WARNING': syslog_priority = '4'
-            if record.levelname == 'ERROR': syslog_priority = '3'
-            if record.levelname == 'CRITICAL': syslog_priority = '2'
-            eem_action_syslog('%s@%s: %s' % (record.funcName, record.lineno, record.msg), priority=syslog_priority)
-        except Exception as e:
-            print('do_guestshell_syslog error occurred: %s' % type(e).__name__)
-            print(e)
+            pri = '5'
+            if record.levelname == 'DEBUG': pri = '7'
+            if record.levelname == 'INFO': pri = '6'
+            if record.levelname == 'WARNING': pri = '4'
+            if record.levelname == 'ERROR': pri = '3'
+            if record.levelname == 'CRITICAL': pri = '2'
+
+            # transform single/double quotes to tilde ~ eem_commands to avoid delimiter collisions
+            # TODO: see if escape or literal syntax works for double and single quotes
+            new_msg = record.msg
+            new_msg = new_msg.replace('"', '~')
+            new_msg = new_msg.replace("'", "~")
+            new_msg = new_msg.splitlines()
+
+            eem_commands = ['no event manager applet eem_action_syslog',
+                            'event manager applet eem_action_syslog',
+                            'event none maxrun 600', ]
+            i = 100
+            for line in new_msg:
+                i = i + 1
+                # break new_msg into chunks
+                chunks, chunk_size = len(line), 100
+                line_chunks = [line[i:i + chunk_size] for i in range(0, chunks, chunk_size)]
+                for nibble in line_chunks:
+                    nibble_msg = '%s@%s: %s' % (record.funcName, record.lineno, nibble)
+                    eem_commands.append('action %03d syslog priority %s msg \"%s\" facility %s' % (i, pri, nibble_msg, 'ZTP'))
+            # do not call do_configure().. call configure() directly .. otherwise will get loop
+            configure(eem_commands)
+            # do not call do_cli().. call cli() directly .. otherwise will get loop
+            cli('enable ; event manager run eem_action_syslog')
+            eem_commands = ['no event manager applet eem_action_syslog']
+            # do not call do_configure().. call configure() directly .. otherwise will get loop
+            configure(eem_commands)
+        # always return True to allow the logger to send message to other handlers
         return True
 
     # trigger a SYSLOG message as well using addFilter technique
-    ztp_log.addFilter(do_guestshell_syslog)
+    ztp_log.addFilter(eem_action_syslog)
     if code_debugging:
         configure('logging trap debugging')
         ztp_log.info('configured logging trap debugging')

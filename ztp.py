@@ -159,7 +159,7 @@ def deploy_eem_cleanup_script():
                     'action 2.1 cli command "y" pattern "proceed"',
                     'action 2.2 cli command "y"'
                     ]
-    results = configurep(eem_commands)
+    do_configurep(eem_commands, 'deploy_eem_cleanup_script()')
     print ('*** Successfully configured cleanup EEM script on device! ***')
     log_info('*** Successfully configured cleanup EEM script on device! ***')
 
@@ -172,7 +172,7 @@ def deploy_eem_upgrade_script(image):
                     'action 2.1 cli command "n" pattern "proceed"',
                     'action 2.2 cli command "y"'
                     ]
-    results = configurep(eem_commands)
+    do_configurep(eem_commands, 'deploy_eem_upgrade_script()')
     print ('*** Successfully configured upgrade EEM script on device! ***')
     log_info('*** Successfully configured upgrade EEM script on device! ***')
 

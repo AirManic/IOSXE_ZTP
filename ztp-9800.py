@@ -116,7 +116,10 @@ def main():
 def configure_logger(logger_name='ZTP'):
     logging.getLogger(logger_name)
     ztp_log = get_logger(logger_name)
-    ztp_log.setLevel(logging.DEBUG)
+    if code_debugging:
+        ztp_log.setLevel(logging.DEBUG)
+    else:
+        ztp_log.setLevel(logging.INFO)
 
     # Create sys.stdout Stream handler
     handler = logging.StreamHandler()

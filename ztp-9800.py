@@ -314,7 +314,7 @@ class IOSXEDevice(dict):
             '''
             %PNP-6-PNP_SCRIPT_STARTED: Script (http://192.168.201.68/ztp/ztp-9800.py)
             '''
-            results = re.search(pattern="%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)",
+            results = re.search(pattern=r'%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)',
                                 string=show_log)
             if results:
                 ztp_script = ztp_script._replace(xfer_mode=results.group(1),
@@ -583,24 +583,25 @@ class IOSXEDevice(dict):
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         dir_check = 'dir ' + filesys + filename
         results = self.do_cli(dir_check)
-        if 'No such filename or directory' in results:
-            self.ztp_log.warning('%s does NOT exist on %s' % (filename, filesys))
-            results = False
-        elif 'Directory of %s%s' % (filesys, filename) in results:
-            self.ztp_log.info('%s does EXIST on %s' % (filename, filesys))
-            results = True
-        elif 'Directory of %s%s' % ('bootflash:/', filename) in results:
-            self.ztp_log.info('%s does EXIST on %s' % (filename, 'bootflash:/'))
-            results = True
-        else:
-            self.ztp_log.error('UnexpectedOutput')
-            raise ValueError('UnexpectedOutput')
+        if filename:
+            if 'No such filename or directory' in results:
+                self.ztp_log.warning('%s does NOT exist on %s' % (filename, filesys))
+                results = False
+            elif 'Directory of %s%s' % (filesys, filename) in results:
+                self.ztp_log.info('%s does EXIST on %s' % (filename, filesys))
+                results = True
+            elif 'Directory of %s%s' % ('bootflash:/', filename) in results:
+                self.ztp_log.info('%s does EXIST on %s' % (filename, 'bootflash:/'))
+                results = True
+            else:
+                self.ztp_log.error('UnexpectedOutput')
+                raise ValueError('UnexpectedOutput')
         self.ztp_log.info('returning %s' % results)
         return results
 
     def deploy_eem_upgrade_script(self, app_label='upgrade', filesys='flash:/', filename: str = None):
-        self.ztp_log.debug('called from %s()@%s with (filename=%s, app_label=%s)' % (
-            inspect.stack()[1][3], inspect.stack()[1][2], filename, app_label))
+        self.ztp_log.debug('called from %s()@%s with (filename=%s, app_label=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], filename, app_label))
         if filename:
             install_command = 'install add filename ' + filesys + filename + ' activate commit'
             eem_commands = ['no event manager applet %s' % app_label,
@@ -614,18 +615,19 @@ class IOSXEDevice(dict):
             self.do_configure(eem_commands)
 
     def deploy_eem_remove_inactive_script(self, app_label='remove_inactive'):
-        self.ztp_log.debug(
-            'called from %s()@%s with (app_label=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], app_label))
-        install_command = 'install remove inactive'
-        eem_commands = ['no event manager applet %s' % app_label,
-                        'event manager applet %s' % app_label,
-                        'event none maxrun 600',
-                        'action 1.0 cli command "enable"',
-                        'action 2.0 cli command "%s" pattern "\[y\/n\]"' % install_command,
-                        'action 2.1 cli command "y" pattern "proceed"',
-                        'action 2.2 cli command "y"'
-                        ]
-        self.do_configure(eem_commands)
+        self.ztp_log.debug('called from %s()@%s with (app_label=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], app_label))
+        if True:
+            install_command = 'install remove inactive'
+            eem_commands = ['no event manager applet %s' % app_label,
+                            'event manager applet %s' % app_label,
+                            'event none maxrun 600',
+                            'action 1.0 cli command "enable"',
+                            'action 2.0 cli command "%s" pattern "\[y\/n\]"' % install_command,
+                            'action 2.1 cli command "y" pattern "proceed"',
+                            'action 2.2 cli command "y"'
+                            ]
+            self.do_configure(eem_commands)
 
     def file_transfer(self, transferit: TransferInfo_tuple = TransferInfo_tuple_create(), filesys='flash:/'):
         self.ztp_log.debug('called from %s()@%s with (transferit=%s)' % (
@@ -647,29 +649,21 @@ class IOSXEDevice(dict):
             command_delete = 'delete ' + filesys + filename
             command = ('copy ' + xfer_mode + username + password + hostname + port + path + filename +
                        ' ' + filesys + filename)
+            command_set = (command_delete, command)
 
             try:
-                self.do_cli('%s ; %s' % (command_delete, command))
+                self.ztp_log.info('CLI %s'% command_set)
+                self.do_cli('%s ; %s' % command_set)
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
         # not really sending back list, but putting list wrapper to let it do %s
-        self.ztp_log.info('returning %s' % [transferit])
+        self.ztp_log.debug('returning %s' % [transferit])
         return transferit
 
-    def find_certs(self):
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        certs = self.do_cli('show run | include crypto pki')
-        if certs:
-            certs_split = certs.splitlines()
-            certs_split.remove('')
-            for cert in certs_split:
-                command = 'no %s' % cert
-                self.do_configure(command)
-
     def do_cli(self, command: str = None):
-        self.ztp_log.debug(
-            'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
+        self.ztp_log.debug('called from %s()@%s with (command=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
         try:
             results = cli('enable ; %s' % command)
@@ -691,8 +685,8 @@ class IOSXEDevice(dict):
         return results
 
     def do_configure(self, command: Union[str, list]):
-        self.ztp_log.debug(
-            'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
+        self.ztp_log.debug('called from %s()@%s with (command=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
         try:
             results = configure(command)
@@ -706,34 +700,37 @@ class IOSXEDevice(dict):
     def check_upgrade_required(self, version_cur: str = None, version_tar: str = None):
         self.ztp_log.debug('called from %s()@%s with (version_cur=%s, version_tar=%s)' %
                           (inspect.stack()[1][3], inspect.stack()[1][2], version_cur, version_cur))
-        self.ztp_log.info(
-            'Code Version Current is %s and Code Version Target is %s' % (version_cur, version_tar))
         results = None
         if version_cur and version_tar:
+            self.ztp_log.info('Code Version Current is %s and Code Version Target is %s' % (version_cur, version_tar))
             results = version_cur == version_tar
-        self.ztp_log.info('returning %s' % results)
+            self.ztp_log.info('is %s' % results)
+            self.ztp_log.debug('returning %s' % results)
         return results
 
     def verify_dst_image_md5(self, src_md5: str = None, filesys='flash:/', filename: str = None):
         self.ztp_log.debug('called from %s()@%s with (src_md5=%s, filesys=%s, filename=%s)' %
                           (inspect.stack()[1][3], inspect.stack()[1][2], src_md5, filesys, filename))
-        self.ztp_log.info('(src_md5=%s, filesys=%s, filename=%s)' % (src_md5, filesys, filename))
-        verify_md5 = 'verify /md5 ' + filesys + filename
-        if code_debugging: self.ztp_log.debug('%s' % verify_md5)
-        dst_md5 = None
-        try:
-            dst_md5 = self.do_cli(verify_md5)
-            if src_md5 in dst_md5:
-                self.ztp_log.info('MD5 hashes match')
-                return True
-            else:
-                self.ztp_log.warning('MD5 hashes do NOT match')
-                return False
-        except Exception as e:
-            self.ztp_log.error('MD5 checksum failed due to an exception')
-            print(e)
-            if code_debugging: self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
-            return False
+        results = None
+        if filename and src_md5:
+            dst_md5 = None
+            try:
+                verify_md5 = 'verify /md5 ' + filesys + filename
+                self.ztp_log.info('CLI %s' % verify_md5)
+                dst_md5 = self.do_cli(verify_md5)
+                if src_md5 in dst_md5:
+                    self.ztp_log.info('MD5 hashes match')
+                    results = True
+                else:
+                    self.ztp_log.warning('MD5 hashes do NOT match')
+                    results = False
+            except Exception as e:
+                self.ztp_log.error('MD5 checksum failed due to an exception')
+                print(e)
+                if code_debugging: self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
+                results = False
+        self.ztp_log.info('is %s' % results)
+        self.ztp_log.debug('returning %s' % results)
 
     def extract_default_xfer_servers(self, ini_file_contents: str = None):
         self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -742,17 +739,14 @@ class IOSXEDevice(dict):
             pass
             self.ztp_log.info('contents are \n%s' % ini_file_contents)
             # TODO: extract from filename as xfer_servers list
-
-        # TODO: temporary list
-        xfer_servers = []
-        server = TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210')
-        xfer_servers.append(server)
-        server = TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210')
-        xfer_servers.append(server)
-        server = TransferInfo_tuple_create(xfer_mode='ntp', hostname='192.168.201.254')
-        xfer_servers.append(server)
-
-        self.ztp_log.info('returning %s' % xfer_servers)
+        if not xfer_servers:
+            xfer_servers = [
+                TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210'),
+                TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210'),
+                TransferInfo_tuple_create(xfer_mode='ntp', hostname='192.168.201.254'),
+                ]
+        self.ztp_log.info('is %s' % xfer_servers)
+        self.ztp_log.debug('returning %s' % xfer_servers)
         return xfer_servers
 
     def configure_syslog_and_ntp(self, xfer_servers: list = None):
@@ -761,16 +755,16 @@ class IOSXEDevice(dict):
         if xfer_servers:
             for srv in xfer_servers:
                 if srv.xfer_mode == 'syslog':
-                    self.ztp_log.debug('adding ZTP syslog servers')
+                    self.ztp_log.info('adding ZTP syslog servers')
                     if isinstance(srv.hostname, str): self.do_configure('logging host %s' % srv.hostname)
                     if isinstance(srv.hostname, list):
                         for i in srv.hostname: self.do_configure('logging host %s' % i)
                 if srv.xfer_mode == 'ntp':
-                    self.ztp_log.debug('adding ZTP ntp servers')
+                    self.ztp_log.info('adding ZTP ntp servers')
                     if isinstance(srv.hostname, str): self.do_configure('ntp server %s' % srv.hostname)
                     if isinstance(srv.hostname, list):
                         for i in srv.hostname: self.do_configure('ntp server %s' % i)
-        self.ztp_log.info('returning %s' % xfer_servers)
+        self.ztp_log.debug('returning %s' % xfer_servers)
         return xfer_servers
 
 

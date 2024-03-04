@@ -54,7 +54,7 @@ def main():
 
         # schedule a reload in case something goes wrong
         # schedule a reload in case something goes wrong
-        cli('reload in 60 reason IOSXEDevice.main@ primary watchdog')
+        cli('enable ; reload in 60 reason IOSXEDevice.main@ primary watchdog')
 
         # calling it "self".. so it sort of looks and acts a lot like the Class behavior
         # this Class object does a large part of the effort as it figures out
@@ -65,7 +65,7 @@ def main():
         self.ztp_log.info('This device is model % and serial %s' % (self.model, self.serial))
 
         # config_basic_access() so can SSH to the DHCP address assigned
-        self.configure_basic_access(self.basic_access_commands)
+        self.do_configure(self.basic_access_commands)
 
         self.version_tar_map = {
             'img': self.ztp_script._replace(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
@@ -100,7 +100,7 @@ def main():
                     time.sleep(timeout_pause)
                     self.ztp_log.info(
                         'eem upgrade took more than %s seconds to reload the device. increase the sleep time by few '
-                        'minutes before retrying' % timeout_upgrade)
+                        'minutes before retrying' % timeout_pause)
 
             # Only do remove_inactive .. if actually did an upgrade in case someone is doing these steps manually and
             # want to keep inactive around
@@ -119,12 +119,13 @@ def main():
 
         self.ztp_log.info('Day0 configuration push')
         self.configure_merge(filename=self.device_config_file.filename)
-        timeout_pause = 120
+        timeout_pause = 30
         self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
         time.sleep(timeout_pause)
         # TODO:  .. neutered for now
         self.do_cli('! write memory')
 
+        # regenerate the local rsa key for ssh/etc
         self.do_configure('crypto key generate rsa modulus 4096')
         self.ztp_log.info('END')
 
@@ -132,7 +133,7 @@ def main():
         self.ztp_log.critical('aborting. failure encountered during day 0 provisioning. error details below')
         self.ztp_log.debug('an error occurred: %s' % type(e).__name__)
         print(e)
-        cli('show logging | inc ZTP')
+        cli('enable ; show logging | inc ZTP')
         sys.exit(e)
 
 
@@ -168,7 +169,7 @@ def configure_logger(logger_name='ZTP'):
         # do not call do_configure().. call configure() directly .. otherwise will get loop
         configure(eem_commands)
         # do not call do_cli().. call cli() directly .. otherwise will get loop
-        cli('event manager run eem_action_syslog')
+        cli('enable ; event manager run eem_action_syslog')
         eem_commands = ['no event manager applet eem_action_syslog']
         # do not call do_configure().. call configure() directly .. otherwise will get loop
         configure(eem_commands)
@@ -194,8 +195,10 @@ def configure_logger(logger_name='ZTP'):
 
     # trigger a SYSLOG message as well using addFilter technique
     ztp_log.addFilter(do_guestshell_syslog)
-    configure('logging trap debugging')
-    ztp_log.info('configured logging trap debugging')
+    if code_debugging:
+        configure('logging trap debugging')
+        configure('logging buffered 1000000')
+        ztp_log.info('configured logging trap debugging')
 
     # TODO .. see if this can be fixed
     '''
@@ -256,7 +259,7 @@ class IOSXEDevice(dict):
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
         self.ztp_seed_defaults_file = self.file_transfer(self.ztp_script._replace(filename='ztp-seed-defaults.ini'))
-        self.ztp_seed_defaults_contents = self.do_cli('enable ; more flash:%s' % self.ztp_seed_defaults_file.filename)
+        self.ztp_seed_defaults_contents = self.do_cli('more flash:%s' % self.ztp_seed_defaults_file.filename)
 
         # extract the xfer_servers .. so we can at least get syslog and ntp working
         self.xfer_servers = self.extract_default_xfer_servers(ini_file_contents=self.ztp_seed_defaults_contents)
@@ -275,12 +278,12 @@ class IOSXEDevice(dict):
         self.device_seed_file = self.file_transfer(
             self.get_device_seed_filename(serial=self.serial, model=self.model, script=self.ztp_script))
         # now load the contents for processing here
-        self.device_seed_file_contents = self.do_cli('enable ; more flash:%s' % self.device_seed_file.filename)
+        self.device_seed_file_contents = self.do_cli('more flash:%s' % self.device_seed_file.filename)
 
         self.device_config_file = self.file_transfer(
             self.get_device_config_filename(serial=self.serial, model=self.model, script=self.ztp_script))
         # now load the contents for processing here
-        self.device_config_file_contents = self.do_cli('enable ; more flash:%s' % self.device_config_file.filename)
+        self.device_config_file_contents = self.do_cli('more flash:%s' % self.device_config_file.filename)
 
         # revisit the xfer_servers, so we can override them if there is device specific version
         self.xfer_servers = None
@@ -362,9 +365,9 @@ class IOSXEDevice(dict):
         model = None
         if show_version:
             try:
-                model = re.search(r"Model Number\s+:\s+(\S+)", show_version).group(1)
+                model = re.search(pattern="Model Number\s+:\s+(\S+)", string=show_version).group(1)
             except AttributeError:
-                model = re.search(r"cisco\s(\w+-.*?)\s", show_version).group(1)
+                model = re.search(pattern="cisco\s(\w+-.*?)\s", string=show_version).group(1)
             self.ztp_log.info('found model %s' % model)
         self.ztp_log.info('returning %s' % model)
         return model
@@ -374,9 +377,9 @@ class IOSXEDevice(dict):
         serial = None
         if show_version:
             try:
-                serial = re.search(r"System Serial Number\s+:\s+(\S+)", show_version).group(1)
+                serial = re.search(pattern="System Serial Number\s+:\s+(\S+)", string=show_version).group(1)
             except AttributeError:
-                serial = re.search(r"Processor board ID\s+(\S+)", show_version).group(1)
+                serial = re.search(pattern="Processor board ID\s+(\S+)", string=show_version).group(1)
             self.ztp_log.info('found serial %s' % serial)
         self.ztp_log.info('returning %s' % serial)
         return serial
@@ -401,7 +404,7 @@ class IOSXEDevice(dict):
         version_cur_mode = None
         if show_version:
             try:
-                results = re.search(r"Installation mode is\s+(\S+)", show_version)
+                results = re.search(pattern="Installation mode is\s+(\S+)", string=show_version)
                 if results:
                     version_cur_mode = results.group(1)
                     self.ztp_log.info('found %s' % version_cur_mode)
@@ -451,7 +454,7 @@ class IOSXEDevice(dict):
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
-        self.ztp_log.info('returning ' % [chassis])
+        self.ztp_log.info('returning s' % [chassis])
         return chassis
 
     def extract_chassis_tar(self, config_file_contents: str = None):
@@ -462,26 +465,33 @@ class IOSXEDevice(dict):
             # TODO: extract chassis_priority from desired config filename interpolation
 
         chassis = chassis_tuple(chassis_num='2', chassis_pri='2')
-        self.ztp_log.info('returning ' % [chassis])
+        self.ztp_log.info('returning %s' % [chassis])
         return chassis
 
     def check_and_change_chassis(self, chassis_cur: chassis_tuple = None, chassis_tar: chassis_tuple = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         if chassis_cur and chassis_tar:
 
+            do_reload = False
+
             if chassis_cur.chassis_pri != chassis_tar.chassis_pri:
                 # changing priority should not trigger a reboot
                 self.ztp_log.info('chassis priority needs to be changed from %s to %s' %
                                   (chassis_cur.chassis_pri, chassis_tar.chassis_pri))
-                self.do_cli('enable ; chassis %s priority %s' %
+                self.do_cli('chassis %s priority %s' %
                             (chassis_cur.chassis_num, chassis_tar.chassis_pri))
+                do_reload = True
 
             elif chassis_cur.chassis_num != chassis_tar.chassis_num:
                 # changing chassis number, should automatically trigger a reboot
                 self.ztp_log.info('chassis number needs to be changed from %s to %s' %
                                   (chassis_cur.chassis_num, chassis_tar.chassis_num))
-                self.do_cli('enable ; chassis %s renumber %s' %
+                self.do_cli('chassis %s renumber %s' %
                             (chassis_cur.chassis_num, chassis_tar.chassis_num))
+                do_reload = True
+
+            if do_reload:
+                self.do_cli('reload in 1 reason check_and_change_chassis() do_reload')
                 timeout_pause = 180
                 self.ztp_log.info(
                     'pausing %s seconds to let check_and_change_chassis@ number from %s to %s trigger a reload' %
@@ -489,6 +499,7 @@ class IOSXEDevice(dict):
                 time.sleep(timeout_pause)
 
         # if did not do a change and reload, return True to indicate all is good
+        self.ztp_log.info('returning %s' % True)
         return True
 
     def extract_ini_section_key(self, ini_file_contents: str = None,
@@ -508,34 +519,38 @@ class IOSXEDevice(dict):
         """
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         results = None
-        if not ini_file_contents: return False
-        try:
-            config = configparser.ConfigParser()
-            config.sections()
-            if code_debugging: self.ztp_log.info('here are the sections %s' % config.sections())
-            config.read_string(ini_file_contents)
-            if sec and key and sec in config and key in config[sec]:
-                results = config[sec][key]
-                self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
-            elif sec and key and sec in config and key not in config[sec]:
+        if ini_file_contents:
+            try:
+                config = configparser.ConfigParser()
+                config.sections()
+                if code_debugging: self.ztp_log.info('here are the sections %s' % config.sections())
+                config.read_string(ini_file_contents)
+                if sec and key and sec in config and key in config[sec]:
+                    results = config[sec][key]
+                    self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
+                elif sec and key and sec in config and key not in config[sec]:
+                    results = None
+                    self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
+                elif sec and not key and not sec_partial:
+                    results = sec in config
+                    self.ztp_log.info('found section=%s %s' % (sec, results))
+                elif sec and not key and sec_partial:
+                    # TODO: looking for partial match
+                    results = None
+                    self.ztp_log.info('found section=%s %s' % (sec, results))
+            except configparser.MissingSectionHeaderError as e:
                 results = None
-                self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
-            elif sec and not key and not sec_partial and sec in config:
-                results = sec in config
-                self.ztp_log.info('found section=%s %s' % (sec, results))
-            elif sec and not key and sec_partial:
-                # TODO: looking for partial match
-                results = None
-                self.ztp_log.info('found section=%s %s' % (sec, results))
-        except Exception as e:
-            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-            print(e)
+            except Exception as e:
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+                print(e)
+        if code_debugging: self.ztp_log.debug('returning %s' % results)
         return results
 
     def extract_software_map(self, ini_file_contents: str = None):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO: fetch these things from an ini filename from the server
-        # TODO: when extracting ... for path, if honor leading '/', else build path as inheritance down hierarchy starting with ztp-script as starting point
+        # TODO: fetch these things from an ini filename from the server TODO: when extracting ... for path,
+        #  if honor leading '/', else build path as inheritance down hierarchy starting
+        #  with ztp-script as starting point
         software_map = None
         results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
                                                sec='software_map', sec_partial=True)
@@ -567,12 +582,6 @@ class IOSXEDevice(dict):
             print(e)
         if code_debugging: self.ztp_log.debug('returning %s' % commands)
         return commands
-
-    def configure_basic_access(self, commands: str = None):
-        self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        if commands:
-            self.do_configure(commands)
-        return (commands)
 
     def configure_replace(self):
         self.ztp_log.info('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -650,10 +659,12 @@ class IOSXEDevice(dict):
             path = '/' + transferit.path if transferit.path else ''
             filename = '/' + transferit.filename if transferit.filename else ''
 
-            command = 'copy ' + xfer_mode + username + password + hostname + port + path + filename + ' ' + filesys + filename
+            command_delete = 'delete ' + filesys + filename
+            command = ('copy ' + xfer_mode + username + password + hostname + port + path + filename +
+                       ' ' + filesys + filename)
 
             try:
-                self.do_cli(command)
+                self.do_cli('enable; %s ; %s' % (command_delete, command))
             except e as Exception:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
@@ -676,16 +687,16 @@ class IOSXEDevice(dict):
             'called from %s()@%s with (command=%s)' % (inspect.stack()[1][3], inspect.stack()[1][2], command))
         results = None
         try:
-            results = cli(command)
+            results = cli('enable ; %s' % command)
         except Exception as e:
             self.ztp_log.debug('An error occurred: %s' % type(e).__name__)
             self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
             print(e)
-            timeout_pause = 90
+            timeout_pause = 10
             self.ztp_log.info('Pause %s seconds .. and Retry %s' % (timeout_pause, command))
             time.sleep(timeout_pause)
             try:
-                results = cli(command)
+                results = cli('enable ; %s' % command)
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
@@ -771,10 +782,11 @@ class IOSXEDevice(dict):
                     if isinstance(srv.hostname, str): self.do_configure('ntp server %s' % srv.hostname)
                     if isinstance(srv.hostname, list):
                         for i in srv.hostname: self.do_configure('ntp server %s' % i)
+        self.ztp_log.info('returning %s' % xfer_servers)
         return xfer_servers
 
 
 if __name__ == "__main__":
     # schedule a reload in case something goes wrong
-    cli('reload in 60 reason before calling main()')
+    cli('enable ; reload in 60 reason before calling main()')
     main()

@@ -1,10 +1,10 @@
 # TODO: docstrings .. top and functions TODO: transfrom into a Class construct to make the code more extensible
 #  beyond ZTP flow, where main() does not get called if used as import
 
-# Importing cli module
+# Cisco guestshell cli module
 from cli import cli, clip, configure, configurep, execute, executep
+# traditional python modules
 import configparser
-import json
 import re
 from collections import namedtuple
 import time
@@ -12,38 +12,9 @@ import sys
 import inspect
 import logging
 from typing import Union
-from logging.handlers import RotatingFileHandler, SysLogHandler
-import os
 
 # only turn this on if want more gory detail of big blocks of logging output and such
-code_debugging = True
-
-'''    
-# TODO: Probably move most of this into the IOSXEDevice class handling
-if self.upgrade_required:
-    # check to see if we have a sufficient model prefix match
-    # .. look for model with the longest starts with match in software_map
-    results = [i for i in self.software_map.keys() if self.model.startswith(i)]
-    self.ztp_log.debug('results of startswith(model) is %s' % results)
-    self._fetch_model = max(results, key=len)
-    self.ztp_log.debug('_fetch_model is %s' % self._fetch_model)
-
-if self._fetch_model:
-    # .. look for version_cur in model table
-    results = [i for i in self.software_map[self._fetch_model].keys() if
-        i == self.version_cur]
-    self._fetch_software = results[0] if len(results) == 1 else ''
-    if self._fetch_software:
-        self.ztp_log.info('found %s when searching for %s in %s' % (
-            results, self.version_cur,
-            self.software_map[self._fetch_model].keys()))
-
-if self._fetch_model and self._fetch_software:
-    self._software_image = self.software_map[self._fetch_model][self._fetch_software][img]
-    self._software_md5 = self.software_map[self._fetch_model][self._fetch_software]['md5']
-self.ztp_log.info('target filename is %s with md5 %s' % (self._fetch_software, self._software_md5))
-self.ztp_log.info('current version is %s' % self.version_cur)
-'''
+code_debugging = False
 
 
 def main():
@@ -560,6 +531,9 @@ class IOSXEDevice(dict):
         results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
                                                sec='software_map', sec_partial=True)
         if results:
+            # TODO: example longest match
+            # .. look for model with the longest starts with match in software_map
+            # results = [i for i in self.software_map.keys() if self.model.startswith(i)]
             software_map = results
         if code_debugging: self.ztp_log.debug('returning %s' % software_map)
         return software_map

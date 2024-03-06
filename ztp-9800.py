@@ -206,8 +206,9 @@ def get_logger(logger_name='ZTP'):
     return ztp_log
 
 TransferInfo_tuple = namedtuple(typename='TransferInfo_tuple',
-                                field_names='xfer_mode username password hostname port path filename md5')
-TransferInfo_tuple_defaults = {'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
+                                field_names='version_target xfer_mode username password hostname port path filename md5')
+TransferInfo_tuple_defaults = {'version_target': None,
+                               'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
                                'port': None, 'path': None, 'filename': None, 'md5': None, }
 chassis_tuple = namedtuple(typename='chassis', field_names='chassis_num chassis_pri')
 
@@ -709,7 +710,7 @@ class IOSXEDevice(dict):
 
     def extract_ini_section_key(self, ini_file_contents: str = None,
                                 section: str = None, section_partial: bool = False,
-                                key: str = None, worker: str = None):
+                                key: str = None):
         """
         returns
             - if both section and key are specified, return section/key else None
@@ -722,32 +723,31 @@ class IOSXEDevice(dict):
         :param key:
         :return:
         """
-        self.ztp_log.debug('called from %s()@%s with (section=%s, section_partial=%s, key=%s, worker=%s)' %
-                           (inspect.stack()[1][3], inspect.stack()[1][2], section, section_partial, key, worker))
+        self.ztp_log.debug('called from %s()@%s with (section=%s, section_partial=%s, key=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], section, section_partial, key))
         results = None
         if ini_file_contents:
             try:
                 config = configparser.ConfigParser()
                 config.sections()
                 config.read_string(ini_file_contents)
-                if code_debugging or code_debugging_TODO: self.ztp_log.debug('worker %s here are the sections %s' % (worker, config.sections()))
                 if section and key and section in config and key in config[section]:
                     results = config[section][key]
-                    self.ztp_log.info('worker %s found section=%s key=%s %s' % (worker, section, key, results))
+                    self.ztp_log.info('found section=%s key=%s %s' % (section, key, results))
                 elif section and key and section in config and key not in config[section]:
                     results = None
-                    self.ztp_log.info('worker %s found section=%s key=%s %s' % (worker, section, key, results))
+                    self.ztp_log.info('found section=%s key=%s %s' % (section, key, results))
                 elif section and not key and not section_partial:
-                    results = section in config
-                    self.ztp_log.info('worker %s found section=%s %s' % (worker, section, results))
+                    results = config[section].keys()
+                    self.ztp_log.info('found section=%s %s' % (section, [results]))
                 elif section and not key and section_partial:
                     # .. look for model with the longest starts with match in section
                     results = [i for i in config.sections() if i.startswith(section)]
-                    self.ztp_log.info('worker %s found section=%s %s' % (worker, section, results))
+                    self.ztp_log.info('found section=%s %s' % (section, results))
             except configparser.MissingSectionHeaderError:
                 results = None
             except Exception as e:
-                self.ztp_log.debug('worker %s error occurred: %s' % (worker, type(e).__name__))
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
         self.ztp_log.debug('returning %s' % results)
         return results
@@ -769,26 +769,23 @@ class IOSXEDevice(dict):
             # results has the list of section names
             structure_results = None
             if results:
-                structure_results = []
+                structure_results = {}
                 for section in results:
-                    # see if this section has any of our desired values
                     transferit = TransferInfo_tuple_create()
-                    for key in transferit._fields:
+                    keys = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=section)
+                    # only fetch keys for desired tuple
+                    keys = [item for item in keys if item in transferit._fields]
+                    # see if this section has any of our desired values
+                    for key in keys:
                         key_val = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
                                                                section=section, key=key)
                         if key_val:
                             transferit = transferit._replace(**{key:key_val})
                             if code_debugging_TODO: self.ztp_log.debug('found %s' % [transferit])
-                    structure_results.append(transferit)
-                self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
+                    structure_results[section] = transferit
+                    if structure_results:
+                        self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
 
-        structure_results = None
-        if not structure_results:
-            structure_results = [
-                TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210'),
-                TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210'),
-                TransferInfo_tuple_create(xfer_mode='ntp', hostname='192.168.201.254'),
-                ]
         if code_debugging or code_debugging_TODO: self.ztp_log.debug('is %s' % structure_results)
         self.ztp_log.debug('returning %s' % structure_results)
         return structure_results

@@ -4,6 +4,7 @@
 # Cisco guestshell cli module
 from cli import cli, clip, configure, configurep, execute, executep
 # traditional python modules
+import concurrent.futures
 import configparser
 import re
 from collections import namedtuple
@@ -14,7 +15,12 @@ import logging
 from typing import Union
 
 # only turn this on if want more gory detail of big blocks of logging output and such
+# code_debugging is for all points of debugging
 code_debugging = False
+# code_debugging_TODO is for only focused areas
+code_debugging_TODO = True
+
+IOSXEDEVICE_FILESYS_DEFAULT = 'flash:'
 
 
 def main():
@@ -109,6 +115,10 @@ def main():
         ztp_log.critical('aborting. failure encountered during day 0 provisioning. error details below')
         ztp_log.debug('an error occurred: %s' % type(e).__name__)
         print(e)
+        # TODO: experimenting
+        self.ztp_log.debug('inspect.stack() is %s' % inspect.stack())
+        self.ztp_log.debug('inspect.trace() is %s' % inspect.trace())
+
         cli('enable ; show logging | inc ZTP')
         sys.exit(1)
 
@@ -116,7 +126,7 @@ def main():
 def configure_logger(logger_name='ZTP'):
     logging.getLogger(logger_name)
     ztp_log = get_logger(logger_name)
-    if code_debugging:
+    if code_debugging or code_debugging_TODO:
         ztp_log.setLevel(logging.DEBUG)
     else:
         ztp_log.setLevel(logging.INFO)
@@ -173,7 +183,7 @@ def configure_logger(logger_name='ZTP'):
 
     # trigger a SYSLOG message as well using addFilter technique
     ztp_log.addFilter(eem_action_syslog)
-    if code_debugging:
+    if code_debugging or code_debugging_TODO:
         configure('logging trap debugging')
         ztp_log.info('configured logging trap debugging')
 
@@ -195,13 +205,11 @@ def get_logger(logger_name='ZTP'):
     ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
     return ztp_log
 
-
 TransferInfo_tuple = namedtuple(typename='TransferInfo_tuple',
                                 field_names='xfer_mode username password hostname port path filename md5')
 TransferInfo_tuple_defaults = {'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
                                'port': None, 'path': None, 'filename': None, 'md5': None, }
 chassis_tuple = namedtuple(typename='chassis', field_names='chassis_num chassis_pri')
-
 
 def TransferInfo_tuple_create(**kwargs):
     transferit = TransferInfo_tuple(**TransferInfo_tuple_defaults)
@@ -227,79 +235,97 @@ class IOSXEDevice(dict):
         # get script_name so can know some starting point server to fetch initial defaults
         self.ztp_script = self.get_ztp_script()
         # only after get_ztp_script .. logging buffered clears the log.. and breaks finding the "PNP" log message
-        if code_debugging: configure('logging buffered 200000000')
+        if code_debugging or code_debugging_TODO: configure('logging buffered 200000000')
 
-        # get the overall defaults
-        self.ztp_seed_defaults_file = self.file_transfer(self.ztp_script._replace(filename='ztp-seed-defaults.ini'))
-        self.ztp_seed_defaults_contents = self.do_cli('more flash:%s' % self.ztp_seed_defaults_file.filename)
+        self.ztp_seed_defaults_file = None
+        self.ztp_seed_defaults_contents = None
 
-        # extract the xfer_servers .. so we can at least get syslog and ntp working
-        self.xfer_servers = self.extract_default_xfer_servers(ini_file_contents=self.ztp_seed_defaults_contents)
-        # now that servers are loaded.. activate the syslog and ntp references
-        self.configure_syslog_and_ntp(self.xfer_servers)
+        if self.ztp_script:
+            transferit = self.ztp_script._replace(filename='ztp-seed-defaults.ini')
+            self.ztp_seed_defaults_file = self.file_transfer(transferit)
+            self.ztp_seed_defaults_contents = self.do_cli('more %s%s' %
+                                                          (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
+        self.xfer_servers = None
+        self.basic_access_commands = None
+        self.software_map = None
+        self.basic_access_commands_cleanup = None
 
-        # create a cache of the show_version rather than fetching it repeatedly
+        ini_file_contents = self.ztp_seed_defaults_contents
+        if ini_file_contents:
+
+            structure = 'xfer_server'
+            results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
+            if results: self.xfer_servers = results
+
+            # now that servers are loaded.. activate the syslog and ntp references
+            self.configure_syslog_and_ntp(self.xfer_servers)
+
+            structure = 'basic_access_commands'
+            key = 'commands'
+            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
+            if results: self.basic_access_commands = results
+
+            structure='basic_access_commands_cleanup'
+            key='commands'
+            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
+            if results: self.basic_access_commands_cleanup = results
+
+            structure = 'software_map'
+            results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
+            if results: self.software_map = results
+
         self.show_version = self.get_show_version()
-        # these items use self.show_version
         self.model = self.get_model(self.show_version)
         self.serial = self.get_serial(self.show_version)
         self.version_cur = self.get_version_cur(self.show_version)
         self.version_cur_mode = self.get_version_cur_mode(self.show_version)
 
-        # transfer the device_seed_file into flash
-        self.device_seed_file = self.file_transfer(
-            self.get_device_seed_filename(serial=self.serial, model=self.model, script=self.ztp_script))
-        # now load the contents for processing here
-        self.device_seed_file_contents = self.do_cli('more flash:%s' % self.device_seed_file.filename)
+        self.device_seed_file = None
+        self.device_seed_file_contents = None
 
-        self.device_config_file = self.file_transfer(
-            self.get_device_config_filename(serial=self.serial, model=self.model, script=self.ztp_script))
-        # now load the contents for processing here
-        self.device_config_file_contents = self.do_cli('more flash:%s' % self.device_config_file.filename)
+        if self.ztp_script and self.serial and self.model:
+            transferit = self.ztp_script._replace(filename='ztp-seed-%s-%s.ini' % (self.model, self.serial))
+            self.device_seed_file = self.file_transfer(transferit)
+            self.device_seed_file_contents = self.do_cli('more %s%s' %
+                                                          (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
+        ini_file_contents = self.device_seed_file_contents
+        if ini_file_contents:
 
-        # revisit the xfer_servers, so we can override them if there is device specific version
-        self.xfer_servers = None
-        results_device_seed = self.extract_default_xfer_servers(ini_file_contents=self.device_seed_file_contents)
-        results_ztp_seed = self.extract_default_xfer_servers(ini_file_contents=self.ztp_seed_defaults_contents)
-        if results_device_seed:
-            self.xfer_servers = results_device_seed
-        else:
-            self.xfer_servers = results_ztp_seed
+            # revisit these .. override if device specific if exist
 
-        # extract the basic access commands .. use the device specific if exist, else fall back to ztp default
-        self.basic_access_commands = None
-        results_device_seed = self.extract_ini_section_key(ini_file_contents=self.device_seed_file_contents,
-                                                           sec='basic_access_commands', key='commands')
-        results_ztp_seed = self.extract_ini_section_key(ini_file_contents=self.ztp_seed_defaults_contents,
-                                                        sec='basic_access_commands', key='commands')
-        if results_device_seed:
-            self.basic_access_commands = results_device_seed
-        elif results_ztp_seed:
-            self.basic_access_commands = results_ztp_seed
+            structure = 'xfer_server'
+            results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
+            if results: self.xfer_servers = results
 
-        self.basic_access_commands_cleanup = None
-        results_device_seed = self.extract_ini_section_key(ini_file_contents=self.device_seed_file_contents,
-                                                           sec='basic_access_commands_cleanup', key='commands')
-        results_ztp_seed = self.extract_ini_section_key(ini_file_contents=self.ztp_seed_defaults_contents,
-                                                        sec='basic_access_commands_cleanup', key='commands')
-        if results_device_seed:
-            self.basic_access_commands_cleanup = results_device_seed
-        elif results_ztp_seed:
-            self.basic_access_commands_cleanup = results_ztp_seed
+            # activate the syslog and ntp references .. add any device specific servers
+            self.configure_syslog_and_ntp(self.xfer_servers)
 
+            structure = 'basic_access_commands'
+            key = 'commands'
+            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
+            if results: self.basic_access_commands = results
 
-        # chassis_priority aspects
+            structure='basic_access_commands_cleanup'
+            key='commands'
+            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
+            if results: self.basic_access_commands_cleanup = results
+
+            structure='software_map'
+            results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
+            if results: self.software_map = results
+
+        self.device_config_file = None
+        self.device_config_file_contents = None
+
+        if self.ztp_script and self.serial and self.model:
+            # TODO: fetch more specific file if called out in ztp-seed-MODEL-SERIAL.ini
+            transferit = self.ztp_script._replace(filename='%s-%s.cfg' % (self.model, self.serial))
+            self.device_config_file = self.file_transfer(transferit)
+            self.device_config_file_contents = self.do_cli('more %s%s' %
+                                                          (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
+
         self.chassis_cur = self.get_chassis_cur()
         self.chassis_tar = self.extract_chassis_tar(config_file_contents=self.device_config_file_contents)
-
-        # extract the software_map .. use the device specific if exist, else fall back to ztp default
-        self.software_map = None
-        results_device_seed = self.extract_software_map(ini_file_contents=self.device_seed_file_contents)
-        results_ztp_seed = self.extract_software_map(ini_file_contents=self.ztp_seed_defaults_contents)
-        if results_device_seed:
-            self.software_map = results_device_seed
-        elif results_ztp_seed:
-            self.software_map = results_ztp_seed
 
         # TODO: version_tar_map
         self.version_tar_map = None
@@ -490,67 +516,6 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('returning %s' % True)
         return True
 
-    def extract_ini_section_key(self, ini_file_contents: str = None,
-                                sec: str = None, sec_partial: bool = False,
-                                key: str = None):
-        """
-        returns
-            - if both sec and key are specified, return sec/key else None
-            - if only section is specified and sec_partial is False return True if the sec is found else False
-            - if only section is specified and sec_partial is True return section names that are partial match else None
-
-        :param ini_file_contents:
-        :param sec:
-        :param sec_partial:
-        :param key:
-        :return:
-        """
-        self.ztp_log.debug('called from %s()@%s with (sec=%s, sec_partial=%s, key=%s)' %
-                           (inspect.stack()[1][3], inspect.stack()[1][2], sec, sec_partial, key))
-        results = None
-        if ini_file_contents:
-            try:
-                config = configparser.ConfigParser()
-                config.sections()
-                if code_debugging: self.ztp_log.info('here are the sections %s' % config.sections())
-                config.read_string(ini_file_contents)
-                if sec and key and sec in config and key in config[sec]:
-                    results = config[sec][key]
-                    self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
-                elif sec and key and sec in config and key not in config[sec]:
-                    results = None
-                    self.ztp_log.info('found section=%s key=%s %s' % (sec, key, results))
-                elif sec and not key and not sec_partial:
-                    results = sec in config
-                    self.ztp_log.info('found section=%s %s' % (sec, results))
-                elif sec and not key and sec_partial:
-                    # TODO: looking for partial match
-                    results = None
-                    self.ztp_log.info('found section=%s %s' % (sec, results))
-            except configparser.MissingSectionHeaderError:
-                results = None
-            except Exception as e:
-                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-                print(e)
-        self.ztp_log.debug('returning %s' % results)
-        return results
-
-    def extract_software_map(self, ini_file_contents: str = None):
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        # TODO: fetch these things from an ini filename from the server TODO: when extracting ... for path,
-        #  if honor leading '/', else build path as inheritance down hierarchy starting
-        #  with ztp-script as starting point
-        software_map = None
-        results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
-                                               sec='software_map', sec_partial=True)
-        if results:
-            # TODO: example longest match
-            # .. look for model with the longest starts with match in software_map
-            # results = [i for i in self.software_map.keys() if self.model.startswith(i)]
-            software_map = results
-        if code_debugging: self.ztp_log.debug('returning %s' % software_map)
-        return software_map
-
     def get_version_tar(self):
         '''
         determine best software target from per serial config filename, overall software_map, else overall target
@@ -563,7 +528,7 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('returning %s' % version_tar)
         return version_tar
 
-    def configure_replace(self, filename: str = None, filesys: str = 'flash:'):
+    def configure_replace(self, filename: str = None, filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
         self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         results = None
@@ -574,7 +539,7 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('returning %s' % results)
         return results
 
-    def configure_merge(self, filename: str = None, filesys: str = 'flash:'):
+    def configure_merge(self, filename: str = None, filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
         self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         results = None
@@ -585,7 +550,7 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('returning %s' % results)
         return results
 
-    def check_file_exists(self, filename: str = None, filesys='flash:/'):
+    def check_file_exists(self, filename: str = None, filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
         self.ztp_log.debug('called from %s()@%s with (filename=%s, filesys=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], filename, filesys))
         dir_check = 'dir ' + filesys + filename
@@ -606,7 +571,8 @@ class IOSXEDevice(dict):
         self.ztp_log.info('returning %s' % results)
         return results
 
-    def deploy_eem_upgrade_script(self, app_label='upgrade', filesys='flash:/', filename: str = None):
+    def deploy_eem_upgrade_script(self, app_label='upgrade',
+                                  filesys: str = IOSXEDEVICE_FILESYS_DEFAULT, filename: str = None):
         self.ztp_log.debug('called from %s()@%s with (filename=%s, app_label=%s)' %
                            (inspect.stack()[1][3], inspect.stack()[1][2], filename, app_label))
         if filename:
@@ -636,7 +602,8 @@ class IOSXEDevice(dict):
                             ]
             self.do_configure(eem_commands)
 
-    def file_transfer(self, transferit: TransferInfo_tuple = TransferInfo_tuple_create(), filesys='flash:/'):
+    def file_transfer(self, transferit: TransferInfo_tuple = TransferInfo_tuple_create(),
+                      filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
         self.ztp_log.debug('called from %s()@%s with (transferit=%s)' % (
             inspect.stack()[1][3], inspect.stack()[1][2], transferit))
         if transferit.xfer_mode and transferit.hostname and transferit.filename:
@@ -715,7 +682,8 @@ class IOSXEDevice(dict):
             self.ztp_log.debug('returning %s' % results)
         return results
 
-    def verify_dst_image_md5(self, src_md5: str = None, filesys='flash:/', filename: str = None):
+    def verify_dst_image_md5(self, src_md5: str = None,
+                             filesys: str = IOSXEDEVICE_FILESYS_DEFAULT, filename: str = None):
         self.ztp_log.debug('called from %s()@%s with (src_md5=%s, filesys=%s, filename=%s)' %
                           (inspect.stack()[1][3], inspect.stack()[1][2], src_md5, filesys, filename))
         results = None
@@ -739,22 +707,91 @@ class IOSXEDevice(dict):
         self.ztp_log.info('is %s' % results)
         self.ztp_log.debug('returning %s' % results)
 
-    def extract_default_xfer_servers(self, ini_file_contents: str = None):
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-        xfer_servers = None
+    def extract_ini_section_key(self, ini_file_contents: str = None,
+                                section: str = None, section_partial: bool = False,
+                                key: str = None, worker: str = None):
+        """
+        returns
+            - if both section and key are specified, return section/key else None
+            - if only section is specified and sec_partial is False return True if the section is found else False
+            - if only section is specified and sec_partial is True return section names that are partial match else None
+
+        :param ini_file_contents:
+        :param section:
+        :param section_partial:
+        :param key:
+        :return:
+        """
+        self.ztp_log.debug('called from %s()@%s with (section=%s, section_partial=%s, key=%s, worker=%s)' %
+                           (inspect.stack()[1][3], inspect.stack()[1][2], section, section_partial, key, worker))
+        results = None
         if ini_file_contents:
-            pass
-            self.ztp_log.debug('contents are \n%s' % ini_file_contents)
-            # TODO: extract from filename as xfer_servers list
-        if not xfer_servers:
-            xfer_servers = [
+            try:
+                config = configparser.ConfigParser()
+                config.sections()
+                config.read_string(ini_file_contents)
+                if code_debugging or code_debugging_TODO: self.ztp_log.debug('worker %s here are the sections %s' % (worker, config.sections()))
+                if section and key and section in config and key in config[section]:
+                    results = config[section][key]
+                    self.ztp_log.info('worker %s found section=%s key=%s %s' % (worker, section, key, results))
+                elif section and key and section in config and key not in config[section]:
+                    results = None
+                    self.ztp_log.info('worker %s found section=%s key=%s %s' % (worker, section, key, results))
+                elif section and not key and not section_partial:
+                    results = section in config
+                    self.ztp_log.info('worker %s found section=%s %s' % (worker, section, results))
+                elif section and not key and section_partial:
+                    # .. look for model with the longest starts with match in section
+                    results = [i for i in config.sections() if i.startswith(section)]
+                    self.ztp_log.info('worker %s found section=%s %s' % (worker, section, results))
+            except configparser.MissingSectionHeaderError:
+                results = None
+            except Exception as e:
+                self.ztp_log.debug('worker %s error occurred: %s' % (worker, type(e).__name__))
+                print(e)
+        self.ztp_log.debug('returning %s' % results)
+        return results
+
+    def extract_ini_structure(self, ini_file_contents: str = None, structure: str = None):
+        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+        structure_results = None
+
+        if ini_file_contents and structure:
+            # TODO: extract from filename as structure list
+            if code_debugging_TODO: self.ztp_log.debug('ini_file_contents are \n%s' % ini_file_contents)
+            # find the sections that partially match structure at the start .. and sort them
+            results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
+                                                   section=structure, section_partial=True)
+            if isinstance(results, str): results = [results]
+            if isinstance(results, list): results.sort()
+            if code_debugging_TODO: self.ztp_log.debug(
+                'ini_file_contents found %s partial sections %s' % (structure, results))
+            # results has the list of section names
+            structure_results = None
+            if results:
+                structure_results = []
+                for section in results:
+                    # see if this section has any of our desired values
+                    transferit = TransferInfo_tuple_create()
+                    for key in transferit._fields:
+                        key_val = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
+                                                               section=section, key=key)
+                        if key_val:
+                            transferit = transferit._replace(**{key:key_val})
+                            if code_debugging_TODO: self.ztp_log.debug('found %s' % [transferit])
+                    structure_results.append(transferit)
+                self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
+
+        structure_results = None
+        if not structure_results:
+            structure_results = [
                 TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210'),
                 TransferInfo_tuple_create(xfer_mode='syslog', hostname='192.168.201.210'),
                 TransferInfo_tuple_create(xfer_mode='ntp', hostname='192.168.201.254'),
                 ]
-        self.ztp_log.info('is %s' % xfer_servers)
-        self.ztp_log.debug('returning %s' % xfer_servers)
-        return xfer_servers
+        if code_debugging or code_debugging_TODO: self.ztp_log.debug('is %s' % structure_results)
+        self.ztp_log.debug('returning %s' % structure_results)
+        return structure_results
 
     def configure_syslog_and_ntp(self, xfer_servers: list = None):
         self.ztp_log.debug('called from %s()@%s with (xfer_servers=%s)' %

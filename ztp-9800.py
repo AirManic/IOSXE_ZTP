@@ -18,7 +18,7 @@ from typing import Union
 # code_debugging is for all points of debugging
 code_debugging = False
 # code_debugging_TODO is for only focused areas
-code_debugging_TODO = True
+code_debugging_TODO = False
 
 IOSXEDEVICE_FILESYS_DEFAULT = 'flash:'
 
@@ -205,11 +205,16 @@ def get_logger(logger_name='ZTP'):
     ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
     return ztp_log
 
-TransferInfo_tuple = namedtuple(typename='TransferInfo_tuple',
-                                field_names='version_target xfer_mode username password hostname port path filename md5')
-TransferInfo_tuple_defaults = {'version_target': None,
-                               'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
-                               'port': None, 'path': None, 'filename': None, 'md5': None, }
+TransferInfo_tuple = namedtuple(
+    typename='TransferInfo_tuple',
+    field_names='section version_target xfer_mode username password hostname port path filename md5',
+)
+TransferInfo_tuple_defaults = {
+    'section': None,
+    'version_target': None,
+    'xfer_mode': None, 'username': None, 'password': None, 'hostname': None,
+    'port': None, 'path': None, 'filename': None, 'md5': None,
+}
 chassis_tuple = namedtuple(typename='chassis', field_names='chassis_num chassis_pri')
 
 def TransferInfo_tuple_create(**kwargs):
@@ -733,17 +738,17 @@ class IOSXEDevice(dict):
                 config.read_string(ini_file_contents)
                 if section and key and section in config and key in config[section]:
                     results = config[section][key]
-                    self.ztp_log.info('found section=%s key=%s %s' % (section, key, results))
+                    self.ztp_log.debug('found section=%s key=%s %s' % (section, key, results))
                 elif section and key and section in config and key not in config[section]:
                     results = None
-                    self.ztp_log.info('found section=%s key=%s %s' % (section, key, results))
+                    self.ztp_log.debug('found section=%s key=%s %s' % (section, key, results))
                 elif section and not key and not section_partial:
                     results = config[section].keys()
-                    self.ztp_log.info('found section=%s %s' % (section, [results]))
+                    self.ztp_log.debug('found section=%s %s' % (section, [results]))
                 elif section and not key and section_partial:
                     # .. look for model with the longest starts with match in section
                     results = [i for i in config.sections() if i.startswith(section)]
-                    self.ztp_log.info('found section=%s %s' % (section, results))
+                    self.ztp_log.debug('found section=%s %s' % (section, results))
             except configparser.MissingSectionHeaderError:
                 results = None
             except Exception as e:
@@ -769,9 +774,9 @@ class IOSXEDevice(dict):
             # results has the list of section names
             structure_results = None
             if results:
-                structure_results = {}
+                structure_results = []
                 for section in results:
-                    transferit = TransferInfo_tuple_create()
+                    transferit = TransferInfo_tuple_create(section=section)
                     keys = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=section)
                     # only fetch keys for desired tuple
                     keys = [item for item in keys if item in transferit._fields]
@@ -781,10 +786,9 @@ class IOSXEDevice(dict):
                                                                section=section, key=key)
                         if key_val:
                             transferit = transferit._replace(**{key:key_val})
-                            if code_debugging_TODO: self.ztp_log.debug('found %s' % [transferit])
-                    structure_results[section] = transferit
-                    if structure_results:
-                        self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
+                            self.ztp_log.debug('found %s' % [transferit])
+                    structure_results.append(transferit)
+                    self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
 
         if code_debugging or code_debugging_TODO: self.ztp_log.debug('is %s' % structure_results)
         self.ztp_log.debug('returning %s' % structure_results)
@@ -795,16 +799,13 @@ class IOSXEDevice(dict):
                           (inspect.stack()[1][3], inspect.stack()[1][2], xfer_servers))
         if xfer_servers:
             for srv in xfer_servers:
-                if srv.xfer_mode == 'syslog':
-                    self.ztp_log.info('adding ZTP syslog servers')
-                    if isinstance(srv.hostname, str): self.do_configure('logging host %s' % srv.hostname)
-                    if isinstance(srv.hostname, list):
-                        for i in srv.hostname: self.do_configure('logging host %s' % i)
-                if srv.xfer_mode == 'ntp':
-                    self.ztp_log.info('adding ZTP ntp servers')
-                    if isinstance(srv.hostname, str): self.do_configure('ntp server %s' % srv.hostname)
-                    if isinstance(srv.hostname, list):
-                        for i in srv.hostname: self.do_configure('ntp server %s' % i)
+                # TODO split into a list for processing
+                cmd = None
+                if srv.xfer_mode == 'syslog':   cmd = 'logging host'
+                if srv.xfer_mode == 'ntp':      cmd = 'ntp server'
+                hostname_list = re.split('[\s,]+',srv.hostname)
+                if cmd:
+                    for i in hostname_list: self.do_configure('%s %s' % (cmd,i))
         self.ztp_log.debug('returning %s' % xfer_servers)
         return xfer_servers
 

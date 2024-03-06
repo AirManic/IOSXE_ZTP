@@ -16,7 +16,7 @@ from typing import Union
 
 # only turn this on if want more gory detail of big blocks of logging output and such
 # code_debugging is for all points of debugging
-code_debugging = False
+code_debugging = True
 # code_debugging_TODO is for only focused areas
 code_debugging_TODO = False
 
@@ -627,13 +627,15 @@ class IOSXEDevice(dict):
             filename = '/' + transferit.filename if transferit.filename else ''
 
             command_delete = 'delete ' + filesys + filename
-            command = ('copy ' + xfer_mode + username + password + hostname + port + path + filename +
+            command_copy = ('copy ' + xfer_mode + username + password + hostname + port + path + filename +
                        ' ' + filesys + filename)
-            command_set = command_delete + ' ; ' + command
 
             try:
-                self.ztp_log.info('CLI %s' % command_set)
-                self.do_cli('%s' % command_set)
+                self.ztp_log.info('CLI %s' % command_delete)
+                self.do_cli('%s' % command_delete)
+
+                self.ztp_log.info('CLI %s' % command_copy)
+                self.do_cli('%s' % command_copy)
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
@@ -658,9 +660,9 @@ class IOSXEDevice(dict):
                 results = cli('enable ; %s' % command)
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)
-                print(e)
-                # only print results if got an exception
                 self.ztp_log.debug('(command=%s) and got results \n%s' % (command, results))
+                print(e)
+
         # don't log results... as most of the results are long
         return results
 
@@ -706,8 +708,9 @@ class IOSXEDevice(dict):
                     self.ztp_log.warning('MD5 hashes do NOT match')
                     results = False
             except Exception as e:
-                self.ztp_log.error('MD5 checksum failed due to an exception')
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
                 print(e)
+                self.ztp_log.error('MD5 checksum failed due to an exception')
                 if code_debugging: self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
                 results = False
         self.ztp_log.info('is %s' % results)
@@ -749,7 +752,9 @@ class IOSXEDevice(dict):
                     # .. look for model with the longest starts with match in section
                     results = [i for i in config.sections() if i.startswith(section)]
                     self.ztp_log.debug('found section=%s %s' % (section, results))
-            except configparser.MissingSectionHeaderError:
+            except configparser.MissingSectionHeaderError as e:
+                self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+                print(e)
                 results = None
             except Exception as e:
                 self.ztp_log.debug('error occurred: %s' % type(e).__name__)

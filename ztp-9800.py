@@ -415,8 +415,6 @@ class IOSXEDevice(dict):
 
     def get_serial(self, show_version: str = None):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         serial = None
         if show_version:
             try:
@@ -429,8 +427,6 @@ class IOSXEDevice(dict):
 
     def get_version_cur(self, show_version: str = None):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         version_cur = None
         if show_version:
             try:
@@ -446,8 +442,6 @@ class IOSXEDevice(dict):
 
     def get_version_cur_mode(self, show_version: str = None):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-
-        self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         version_cur_mode = None
         if show_version:
             try:

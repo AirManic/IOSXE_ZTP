@@ -6,6 +6,9 @@
 *.cfg
 *.ini
 
+# shell script
+*.sh
+
 ### Linux ###
 *~
 

@@ -2,8 +2,9 @@
 # Created by https://www.toptal.com/developers/gitignore/api/macos,windows,linux
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,windows,linux
 
-# Device config files
+# Device config & seed ini files
 *.cfg
+*.ini
 
 ### Linux ###
 *~

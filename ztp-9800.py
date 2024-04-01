@@ -7,7 +7,7 @@ from typing import Union
 # only load cli library if running on IOS-XE guestshell.  This way we can do local development on stock OS of IDE.
 if os.uname().nodename == 'guestshell':
     from cli import cli, clip, configure, configurep, execute, executep
-# else create placeholder functions
+# else create placeholder functions so we can exercise the code for development work
 else:
     def cli(command: str):
         return ''
@@ -21,6 +21,14 @@ else:
         return ''
     def executep(command: str):
         return ''
+    SIM_ZTP_SEED_DEFAULTS_FILENAME = 'ztp-seed-defaults.ini'
+    SIM_MODEL = 'C9800-L-C-K9'
+    SIM_SERIAL = 'XXX235100CW'
+    SIM_VERSION_CUR = '17.13.01'
+    SIM_VERSION_CUR_MODE = 'BUNDLE'
+    SIM_DEVICE_SEED_DEFAULTS_FILENAME = 'ztp-seed-%s-%s.ini' % (SIM_MODEL, SIM_SERIAL)
+
+
 # traditional python modules
 import concurrent.futures
 import configparser
@@ -46,7 +54,7 @@ def main():
         ztp_log = configure_logger()
 
         # schedule a reload in case something goes wrong
-        reload_time = 4 * 60
+        reload_time = 2 * 60
         command = 'enable ; reload in %s reason IOSXEDevice.main@ primary watchdog' % reload_time
         cli(command)
         ztp_log.info('called cli(%s)' % command)
@@ -289,7 +297,7 @@ class IOSXEDevice(dict):
 
             # if not running under guestshell, simulate the data locally
             if not os.uname().nodename == 'guestshell':
-                with open('ztp-seed-defaults.ini', 'r') as file: ini_file_contents = file.read()
+                with open(SIM_ZTP_SEED_DEFAULTS_FILENAME, 'r') as file: ini_file_contents = file.read()
 
             if ini_file_contents:
 
@@ -332,17 +340,17 @@ class IOSXEDevice(dict):
 
             # if not running under guestshell, simulate the data locally
             if not os.uname().nodename == 'guestshell':
-                self.model = 'C9800-L-F-K9'
-                self.serial = 'XXX235100CW'
-                self.version_cur = '17.13.01'
-                self.version_cur_mode = 'BUNDLE'
+                self.model = SIM_MODEL
+                self.serial = SIM_SERIAL
+                self.version_cur = SIM_VERSION_CUR
+                self.version_cur_mode = SIM_VERSION_CUR_MODE
 
             self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file **********\n***')
             self.device_seed_file = None
             self.device_seed_file_contents = None
 
             if not os.uname().nodename == 'guestshell':
-                with open('ztp-seed-C9800-L-F-K9-XXX235100CW.ini', 'r') as file: self.device_seed_file_contents = file.read()
+                with open(SIM_DEVICE_SEED_DEFAULTS_FILENAME, 'r') as file: self.device_seed_file_contents = file.read()
             elif self.ztp_script and self.serial and self.model:
                 transferit = self.ztp_script._replace(section='device_seed_file',
                                                       filename='ztp-seed-%s-%s.ini' % (self.model, self.serial))

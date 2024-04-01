@@ -341,7 +341,9 @@ class IOSXEDevice(dict):
             self.device_seed_file = None
             self.device_seed_file_contents = None
 
-            if self.ztp_script and self.serial and self.model:
+            if not os.uname().nodename == 'guestshell':
+                with open('ztp-seed-C9800-L-F-K9-XXX235100CW.ini', 'r') as file: self.device_seed_file_contents = file.read()
+            elif self.ztp_script and self.serial and self.model:
                 transferit = self.ztp_script._replace(section='device_seed_file',
                                                       filename='ztp-seed-%s-%s.ini' % (self.model, self.serial))
                 self.device_seed_file = self.file_transfer(transferit)
@@ -349,8 +351,7 @@ class IOSXEDevice(dict):
                                                               (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
             ini_file_contents = self.device_seed_file_contents
             # if not running under guestshell, simulate the data locally
-            if not os.uname().nodename == 'guestshell':
-                with open('C9800-L-F-K9-XXX235100CW.cfg', 'r') as file: ini_file_contents = file.read()
+
             if ini_file_contents:
 
                 # revisit these .. override if device specific if exist

@@ -2,7 +2,25 @@
 #  beyond ZTP flow, where main() does not get called if used as import
 
 # Cisco guestshell cli module
-from cli import cli, clip, configure, configurep, execute, executep
+import os
+from typing import Union
+# only load cli library if running on IOS-XE guestshell.  This way we can do local development on stock OS of IDE.
+if os.uname().nodename == 'guestshell':
+    from cli import cli, clip, configure, configurep, execute, executep
+# else create placeholder functions
+else:
+    def cli(command: str):
+        return ''
+    def clip(command):
+        return ''
+    def configure(configuration: Union[str, list]):
+        return []
+    def configurep(configuration: Union[str, list]):
+        return []
+    def execute(command: str):
+        return ''
+    def executep(command: str):
+        return ''
 # traditional python modules
 import concurrent.futures
 import configparser
@@ -12,7 +30,6 @@ import time
 import sys
 import inspect
 import logging
-from typing import Union
 
 # only turn this on if want more gory detail of big blocks of logging output and such
 # code_debugging is for all points of debugging
@@ -22,38 +39,36 @@ code_debugging_TODO = False
 
 IOSXEDEVICE_FILESYS_DEFAULT = 'flash:'
 
-
 def main():
 
     try:
         # create a device so can start to call logger aspects
-        configure_logger()
+        ztp_log = configure_logger()
 
         # schedule a reload in case something goes wrong
         reload_time = 4 * 60
-        cli('enable ; reload in %s reason IOSXEDevice.main@ primary watchdog' % reload_time)
+        command = 'enable ; reload in %s reason IOSXEDevice.main@ primary watchdog' % reload_time
+        cli(command)
+        ztp_log.info('called cli(%s)' % command)
 
+        ztp_log.info('\n***\n********** ZTP IOSXEDevice() Object Build **********\n***')
         # calling it "self".. so it sort of looks and acts a lot like the Class behavior
         # this Class object does a large part of the effort as it figures out
         # most of the details of the device and fetches the needful support file
         self = IOSXEDevice()
 
-        self.ztp_log.info('\n***\n********** ZTP START **********\n***\n')
+        self.ztp_log.info('\n***\n********** ZTP START **********\n***')
 
         self.ztp_log.info('This device is model %s and serial %s' % (self.model, self.serial))
 
         # do some basic config for things like SSH/etc
         self.do_configure(self.basic_access_commands)
-        self.ztp_log.info('\n***\n********** ZTP BASIC ACCESS CONFIGURED **********\n***\n')
+        self.ztp_log.info('\n***\n********** ZTP BASIC ACCESS CONFIGURED **********\n***')
 
-        self.version_tar_map = {
-            'img': self.ztp_script._replace(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                            md5='70d8a8c0009fc862349a200fd62a0244'),
-        }
-
+        self.ztp_log.info('\n***\n********** ZTP CHECK UPGRADE_REQUIRED **********\n***')
         if self.upgrade_required:
             # TODO: add SMU and APSP & APDP support
-            for component in 'IMG SMU APDP APSP WEB'
+            for component in 'IMG SMU APDP APSP WEB':
                 self.ztp_log.info('\n***\n********** ZTP %s **********\n***\n' % code_phase)
                 # step across each file.. and if it is a nested dict, step across the nesting
                 for entry in self.version_tar_map[component]:
@@ -92,22 +107,21 @@ def main():
             self.ztp_log.info('no upgrade is required')
 
 
-
-
         self.check_and_change_chassis(chassis_cur=self.chassis_cur, chassis_tar=self.chassis_tar)
 
-        self.ztp_log.info('\n***\n***\n********** Day0 configuration push **********\n***\n***\n')
+        self.ztp_log.info('\n***\n********** Day0 configuration push **********\n***')
 
         # stage the cleanup routine so can SSH to the DHCP address assigned
         self.do_configure(self.basic_access_commands_cleanup)
-        self.ztp_log.info('\n***\n***\n********** ZTP BASIC ACCESS CLEANUP CONFIGURED **********\n***\n***\n')
+        self.ztp_log.info('\n***\n********** ZTP BASIC ACCESS CLEANUP CONFIGURED **********\n***')
 
         # TODO: remove any ZTP temporary "logging" and "ntp" .. to clean up and let the final config be prefferred
 
-        self.configure_merge(filename=self.device_config_file.filename)
-        timeout_pause = 30
-        self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
-        time.sleep(timeout_pause)
+        if self.device_config_file:
+            self.configure_merge(filename=self.device_config_file.filename)
+            timeout_pause = 30
+            self.ztp_log.info('pausing %s seconds for any config changes to settle in' % timeout_pause)
+            time.sleep(timeout_pause)
 
         # TODO:  .. neutered for now .. move this into INI file of eem for basic_access_commands_cleanup
         self.do_cli('! write memory')
@@ -129,7 +143,6 @@ def main():
         # TODO: experimenting
         # self.ztp_log.debug('inspect.stack() is %s' % inspect.stack())
         # self.ztp_log.debug('inspect.trace() is %s' % inspect.trace())
-
         cli('enable ; show logging | inc ZTP')
         sys.exit(1)
 
@@ -250,16 +263,20 @@ class IOSXEDevice(dict):
             # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... get_ztp_script **********\n***')
             # get script_name so can know some starting point server to fetch initial defaults
             self.ztp_script = self.get_ztp_script()
+
             # only after get_ztp_script .. logging buffered clears the log.. and breaks finding the "PNP" log message
             if code_debugging or code_debugging_TODO: configure('logging buffered 200000000')
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... ztp_seed_defaults **********\n***')
+
             self.ztp_seed_defaults_file = None
             self.ztp_seed_defaults_contents = None
-
             if self.ztp_script:
-                transferit = self.ztp_script._replace(filename='ztp-seed-defaults.ini')
+                transferit = self.ztp_script._replace(section='ztp_seed_defaults_file',
+                                                      filename='ztp-seed-defaults.ini')
                 self.ztp_seed_defaults_file = self.file_transfer(transferit)
                 self.ztp_seed_defaults_contents = self.do_cli('more %s%s' %
                                                               (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
@@ -269,84 +286,119 @@ class IOSXEDevice(dict):
             self.basic_access_commands_cleanup = None
 
             ini_file_contents = self.ztp_seed_defaults_contents
+
+            # if not running under guestshell, simulate the data locally
+            if not os.uname().nodename == 'guestshell':
+                with open('ztp-seed-defaults.ini', 'r') as file: ini_file_contents = file.read()
+
             if ini_file_contents:
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... ztp_seed_defaults xfer_servers **********\n***')
                 structure = 'xfer_server'
                 results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
                 if results: self.xfer_servers = results
 
                 # now that servers are loaded.. activate the syslog and ntp references
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... ztp_seed_defaults configure_syslog_and_ntp **********\n***')
                 self.configure_syslog_and_ntp(self.xfer_servers)
-                self.ztp_log.info('\n***\n***\n********** ZTP SYSLOG AND NTP CONFIGURED **********\n***\n***\n')
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... ztp_seed_defaults basic_access_commands **********\n***')
                 structure = 'basic_access_commands'
                 key = 'commands'
                 results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
                 if results: self.basic_access_commands = results
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... ztp_seed_defaults basic_access_commands_cleanup **********\n***')
                 structure='basic_access_commands_cleanup'
                 key='commands'
                 results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
                 if results: self.basic_access_commands_cleanup = results
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... ztp_seed_defaults software_map **********\n***')
                 structure = 'software_map'
                 results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
                 if results: self.software_map = results
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... show_version **********\n***')
             self.show_version = self.get_show_version()
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... model **********\n***')
             self.model = self.get_model(self.show_version)
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... serial **********\n***')
             self.serial = self.get_serial(self.show_version)
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... version_cur **********\n***')
             self.version_cur = self.get_version_cur(self.show_version)
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... version_cur_mode **********\n***')
             self.version_cur_mode = self.get_version_cur_mode(self.show_version)
 
+            # if not running under guestshell, simulate the data locally
+            if not os.uname().nodename == 'guestshell':
+                self.model = 'C9800-L-F-K9'
+                self.serial = 'XXX235100CW'
+                self.version_cur = '17.13.01'
+                self.version_cur_mode = 'BUNDLE'
+
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file **********\n***')
             self.device_seed_file = None
             self.device_seed_file_contents = None
 
             if self.ztp_script and self.serial and self.model:
-                transferit = self.ztp_script._replace(filename='ztp-seed-%s-%s.ini' % (self.model, self.serial))
+                transferit = self.ztp_script._replace(section='device_seed_file',
+                                                      filename='ztp-seed-%s-%s.ini' % (self.model, self.serial))
                 self.device_seed_file = self.file_transfer(transferit)
                 self.device_seed_file_contents = self.do_cli('more %s%s' %
                                                               (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
             ini_file_contents = self.device_seed_file_contents
+            # if not running under guestshell, simulate the data locally
+            if not os.uname().nodename == 'guestshell':
+                with open('C9800-L-F-K9-XXX235100CW.cfg', 'r') as file: ini_file_contents = file.read()
             if ini_file_contents:
 
                 # revisit these .. override if device specific if exist
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file xfer_server **********\n***')
                 structure = 'xfer_server'
                 results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
                 if results: self.xfer_servers = results
 
                 # activate the syslog and ntp references .. add any device specific servers
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file configure_syslog_and_ntp **********\n***')
                 self.configure_syslog_and_ntp(self.xfer_servers)
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file basic_access_commands **********\n***')
                 structure = 'basic_access_commands'
                 key = 'commands'
                 results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
                 if results: self.basic_access_commands = results
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file basic_access_commands_cleanup **********\n***')
                 structure='basic_access_commands_cleanup'
                 key='commands'
                 results = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=structure, key=key)
                 if results: self.basic_access_commands_cleanup = results
 
+                self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_seed_file software_map **********\n***')
                 structure='software_map'
                 results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
                 if results: self.software_map = results
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_config_file **********\n***')
             self.device_config_file = None
             self.device_config_file_contents = None
 
             if self.ztp_script and self.serial and self.model:
                 # TODO: fetch more specific file if called out in ztp-seed-MODEL-SERIAL.ini
-                transferit = self.ztp_script._replace(filename='%s-%s.cfg' % (self.model, self.serial))
+                transferit = self.ztp_script._replace(section='device_config_file',
+                                                      filename='%s-%s.cfg' % (self.model, self.serial))
                 self.device_config_file = self.file_transfer(transferit)
                 self.device_config_file_contents = self.do_cli('more %s%s' %
                                                               (IOSXEDEVICE_FILESYS_DEFAULT, transferit.filename))
             # TODO .. look for logging servers in the device_config_file_contents and activate those as well
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... chassis_cur & chassis_tar **********\n***')
             self.chassis_cur = self.get_chassis_cur()
             self.chassis_tar = self.extract_chassis_tar(config_file_contents=self.device_config_file_contents)
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... version_tar **********\n***')
             # TODO: version_tar_map
             self.version_tar_map = None
             self.version_tar = self.get_version_tar()
@@ -356,6 +408,7 @@ class IOSXEDevice(dict):
                                                  md5='70d8a8c0009fc862349a200fd62a0244'),
             }
 
+            self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... upgrade_required **********\n***')
             self.upgrade_required = self.check_upgrade_required(self.version_cur, self.version_tar)
 
         except Exception as e:
@@ -366,7 +419,7 @@ class IOSXEDevice(dict):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
         try:
             self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
-            ztp_script = TransferInfo_tuple_create()
+            ztp_script = TransferInfo_tuple_create(section='ztp_script')
             show_log = self.do_cli('show logging | inc PNP-6-PNP_SCRIPT_STARTED')
             if code_debugging: self.ztp_log.debug('show_log is %s' % show_log)
             results = re.search(pattern=r'%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)',
@@ -455,13 +508,14 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('returning %s' % version_cur_mode)
         return version_cur_mode
 
-    def get_device_seed_filename(self, serial: str = None, model: str = None,
-                                 script: TransferInfo_tuple = TransferInfo_tuple_create()):
+    # TODO remove get_device_seed_file()
+    def get_device_seed_file(self, serial: str = None, model: str = None,
+                             script: TransferInfo_tuple = TransferInfo_tuple_create()):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
 
         self.ztp_log.debug('called from %s()@%s with (model=%s, script=%s)' %
                            (inspect.stack()[1][3], inspect.stack()[1][2], model, script))
-        transferit = TransferInfo_tuple_create()
+        transferit = TransferInfo_tuple_create(section='device_seed_file')
         if script and serial and model:
             transferit = script
             transferit = transferit._replace(filename='ztp-seed-%s-%s.ini' % (model, serial))
@@ -470,13 +524,14 @@ class IOSXEDevice(dict):
         self.ztp_log.debug('returning %s' % [transferit])
         return transferit
 
-    def get_device_config_filename(self, serial: str = None, model: str = None,
-                                   script: TransferInfo_tuple = TransferInfo_tuple_create()):
+    # TODO remove get_device_config_file()
+    def get_device_config_file(self, serial: str = None, model: str = None,
+                               script: TransferInfo_tuple = TransferInfo_tuple_create()):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
 
         self.ztp_log.debug('called from %s()@%s with (serial=%s, script=%s)' %
                            (inspect.stack()[1][3], inspect.stack()[1][2], serial, script))
-        transferit = TransferInfo_tuple_create()
+        transferit = TransferInfo_tuple_create(section='device_config_file')
         if script and serial and model:
             transferit = script
             transferit = transferit._replace(filename='%s-%s.cfg' % (model, serial))
@@ -792,11 +847,11 @@ class IOSXEDevice(dict):
                                 section: str = None, section_partial: bool = False,
                                 key: str = None):
         """
+        Extract some section ... parital or fully .. section from the ini_file_contents.
         returns
             - if both section and key are specified, return section/key else None
             - if only section is specified and sec_partial is False return True if the section is found else False
             - if only section is specified and sec_partial is True return section names that are partial match else None
-
         :param ini_file_contents:
         :param section:
         :param section_partial:
@@ -838,22 +893,33 @@ class IOSXEDevice(dict):
         return return_me
 
     def extract_ini_structure(self, ini_file_contents: str = None, structure: str = None):
+        '''
+        Extract some structure section from the ini_file_contents.
+        :param ini_file_contents:
+        :param structure:
+        :return:
+        '''
         try:
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
             return_me = None
+            # only process if we have ini_file_contents and some structure to extract
             if ini_file_contents and structure:
-                # TODO: extract from filename as structure list
+                # if doing advanced debuggging, dump a lot of details
                 if code_debugging_TODO: self.ztp_log.debug('ini_file_contents are \n%s' % ini_file_contents)
-                # find the sections that partially match structure at the start .. and sort them
+                # find the sections that partially match structure at the start
                 results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
                                                        section=structure, section_partial=True)
+                # if get back a single result, make it a list of one entry
                 if isinstance(results, str): results = [results]
+                # if get back a list of results, sort for processing
                 if isinstance(results, list): results.sort()
+                # if doing advanced debuggging, dump a lot of details
                 if code_debugging_TODO: self.ztp_log.debug(
                     'ini_file_contents found %s partial sections %s' % (structure, results))
                 # results has the list of section names
                 if results:
                     structure_results = []
+                    # step across the list of results and create the individual entries
                     for section in results:
                         transferit = TransferInfo_tuple_create(section=section)
                         keys = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=section)
@@ -871,6 +937,7 @@ class IOSXEDevice(dict):
                 if structure_results:
                     for entry in structure_results:
                         self.ztp_log.info('extracted %s' % [entry])
+                    return_me = structure_results
             self.ztp_log.debug('returning %s' % return_me)
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
@@ -904,7 +971,9 @@ class IOSXEDevice(dict):
 
 
 if __name__ == "__main__":
+
     # schedule a reload in case something goes wrong
     reload_time = 2
     cli('enable ; reload in %s reason before calling main()' % reload_time)
     main()
+

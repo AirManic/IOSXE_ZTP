@@ -765,13 +765,12 @@ class IOSXEDevice(dict):
             print(e)
         return results
 
-    def file_transfer(self, transferit: TransferInfo_tuple = TransferInfo_tuple_create(),
-                      filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
+    def file_transfer(self, transferit: TransferInfo_tuple = None, filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
         try:
             self.ztp_log.info('called from %s()@%s with (transferit=%s)' % (
                 inspect.stack()[1][3], inspect.stack()[1][2], transferit))
             return_me = None
-            if transferit.xfer_mode and transferit.hostname and transferit.filename:
+            if transferit and transferit.xfer_mode and transferit.hostname and transferit.filename:
 
                 # TODO: only take up to '://' or subset
                 xfer_mode = transferit.xfer_mode + '://' if transferit.xfer_mode else ''
@@ -980,7 +979,9 @@ class IOSXEDevice(dict):
         return return_me
 
 
-    def extract_software_tree(self, software_map: list[TransferInfo_tuple] = None, seed_transferit: TransferInfo_tuple = None):
+    # def extract_software_tree(self, software_map: list[TransferInfo_tuple] = None, seed_transferit: TransferInfo_tuple = None):
+    def extract_software_tree(self, software_map: list = None, seed_transferit: TransferInfo_tuple = None):
+
         try:
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
             return_me = None

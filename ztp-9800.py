@@ -1,9 +1,9 @@
-# TODO: docstrings .. top and functions TODO: transfrom into a Class construct to make the code more extensible
-#  beyond ZTP flow, where main() does not get called if used as import
+# TODO: docstrings .. top and functions
 
 # traditional python modules
 import os
 from typing import Union
+import copy
 from collections import namedtuple
 import concurrent.futures
 import configparser
@@ -12,6 +12,7 @@ import time
 import sys
 import inspect
 import logging
+import pprint
 
 # determine if running under IOS-XE guestshell
 is_guestshell = os.uname().nodename == 'guestshell'
@@ -43,9 +44,11 @@ code_debugging_TODO = False
 
 IOSXEDEVICE_FILESYS_DEFAULT = 'flash:'
 
+TransferInfo_tuple_field_names = 'section version_target xfer_mode username password hostname port path filename md5'
+
 TransferInfo_tuple = namedtuple(
     typename='TransferInfo_tuple',
-    field_names='section version_target xfer_mode username password hostname port path filename md5',
+    field_names=TransferInfo_tuple_field_names,
 )
 TransferInfo_tuple_defaults = {
     'section': None,
@@ -60,10 +63,17 @@ def TransferInfo_tuple_create(**kwargs):
     transferit = transferit._replace(**kwargs)
     return transferit
 
+def TransferInfo_tuple_inherit(transferit_parent: TransferInfo_tuple = None, transferit_child: TransferInfo_tuple = None):
+    if transferit_parent and transferit_child:
+        for field in TransferInfo_tuple_field_names.split(' '):
+            if not transferit_child.__getattribute__(field) and transferit_parent.__getattribute__(field):
+                transferit_child = transferit_child._replace(**{field:transferit_parent.__getattribute__(field)})
+    return transferit_child
+
 if not is_guestshell:
     # if not running under guestshell, simulate the data locally
-    SIM_ZTP_SCRIPT = TransferInfo_tuple_create(xfer_mode='ftp',
-                                               hostname='10.0.0.30',
+    SIM_ZTP_SCRIPT = TransferInfo_tuple_create(xfer_mode='scp',
+                                               hostname='10.0.0.301',
                                                path='ztp',
                                                filename='SIM-ztp-9800.py')
     SIM_MODEL = 'C9800-L-C-K9'
@@ -159,14 +169,11 @@ def main():
         # TODO:  .. neutered for now .. move this into INI file of eem for basic_access_commands_cleanup
         self.do_cli('! write memory')
 
-
         # regenerate the local rsa key for ssh/etc
         self.do_configure('crypto key generate rsa modulus 4096')
 
-
-
         # whew.... finally done :) :)
-        self.ztp_log.info('THE END')
+        self.ztp_log.info('WHEW!! THE END!!')
 
     except Exception as e:
         ztp_log = get_logger()
@@ -312,6 +319,7 @@ class IOSXEDevice(dict):
             self.xfer_servers = None
             self.basic_access_commands = None
             self.software_map = None
+            self.software_tree = None
             self.basic_access_commands_cleanup = None
 
             ini_file_contents = self.ztp_seed_defaults_contents
@@ -344,6 +352,9 @@ class IOSXEDevice(dict):
                 results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
                 if results: self.software_map = results
 
+                results = self.extract_software_tree(software_map=self.software_map, seed_transferit=self.ztp_script)
+                if results: self.software_tree = results
+
             if is_guestshell:
                 self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... get_show_version **********\n***')
                 self.show_version = self.get_show_version()
@@ -373,6 +384,7 @@ class IOSXEDevice(dict):
             self.device_xfer_servers = None
             self.device_basic_access_commands = None
             self.device_software_map = None
+            self.device_software_tree = None
             self.device_basic_access_commands_cleanup = None
 
             self.device_seed_file = None
@@ -426,6 +438,9 @@ class IOSXEDevice(dict):
                 results = self.extract_ini_structure(ini_file_contents=ini_file_contents, structure=structure)
                 if results: self.device_software_map = results
 
+                results = self.extract_software_tree(software_map=self.device_software_map, seed_transferit=self.ztp_script)
+                if results: self.device_software_tree = results
+
             self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... device_config_file **********\n***')
             self.device_config_file = None
             self.device_config_file_contents = None
@@ -452,9 +467,9 @@ class IOSXEDevice(dict):
 
             self.ztp_log.info('\n***\n********** ZTP IOSXEDevice() ... version_tar **********\n***')
             # TODO: version_tar_map
-            self.version_tar_map = None
             self.version_tar = self.get_version_tar()
-            # load this with the respective part of the software_table from the software_map
+            self.version_tar_map = None
+            # load this with the respective part of the software_table from the software_map .. use self.device_software_map then self.software_map
             self.version_tar_map = {
                 'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
                                                  md5='70d8a8c0009fc862349a200fd62a0244'),
@@ -610,14 +625,14 @@ class IOSXEDevice(dict):
                 if chassis_cur == chassis_tar:
                     results = True
                     do_reload = False
-                elif chassis_cur.chassis_pri != chassis_tar.chassis_pri:
+                if chassis_cur.chassis_pri != chassis_tar.chassis_pri:
                     # changing priority should not trigger a reboot
                     self.ztp_log.info('chassis priority needs to be changed from %s to %s' %
                                       (chassis_cur.chassis_pri, chassis_tar.chassis_pri))
                     self.do_cli('chassis %s priority %s' %
                                 (chassis_cur.chassis_num, chassis_tar.chassis_pri))
                     do_reload = True
-                elif chassis_cur.chassis_num != chassis_tar.chassis_num:
+                if chassis_cur.chassis_num != chassis_tar.chassis_num:
                     # changing chassis number, should automatically trigger a reboot
                     self.ztp_log.info('chassis number needs to be changed from %s to %s' %
                                       (chassis_cur.chassis_num, chassis_tar.chassis_num))
@@ -955,8 +970,53 @@ class IOSXEDevice(dict):
                         self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
                 if structure_results:
                     for entry in structure_results:
-                        self.ztp_log.info('extracted %s' % [entry])
+                        self.ztp_log.debug('extracted %s' % [entry])
                     return_me = structure_results
+            self.ztp_log.debug('returning %s' % return_me)
+        except Exception as e:
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+            print(e)
+            return_me = None
+        return return_me
+
+
+    def extract_software_tree(self, software_map: list[TransferInfo_tuple] = None, seed_transferit: TransferInfo_tuple = None):
+        try:
+            self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
+            return_me = None
+            # only process if we have software_tree
+            software_tree = {}
+            if software_map:
+                # convert the software_map into a software_tree dict
+                for entry in software_map:
+                    hier = entry.section.split(':')
+                    # for the top two levels, insert default as the model else software
+                    if len(hier) < 4 : hier.append('default')
+                    graft = software_tree
+                    for level in hier:
+                        graftlast = graft
+                        if not level in graft: graft[level] = {}
+                        graft = graft[level]
+                    graftlast.update({level: entry})
+
+                # embedded recursion function for going down tree
+                def tree_inherit(tree_node = None, transferit_inherit: TransferInfo_tuple = None):
+                    if isinstance(tree_node, TransferInfo_tuple) and isinstance(transferit_inherit, TransferInfo_tuple):
+                        tree_node = TransferInfo_tuple_inherit(transferit_parent=transferit_inherit, transferit_child=tree_node)
+                    else:
+                        # see if the next stem has a default section .. if yes, merge inherit into it
+                        stem = 'default'
+                        if stem in tree_node:
+                            tree_node[stem] = tree_inherit(tree_node=tree_node[stem], transferit_inherit=transferit_inherit)
+                            # now switch to the updated defaults for recursion down the tree
+                            transferit_inherit = tree_node[stem]
+                        for stem in tree_node:
+                            tree_node[stem] = tree_inherit(tree_node=tree_node[stem], transferit_inherit=transferit_inherit)
+                    return tree_node
+
+                if software_tree and seed_transferit:
+                    software_tree = tree_inherit(tree_node=software_tree, transferit_inherit=seed_transferit)
+            return_me = software_tree
             self.ztp_log.debug('returning %s' % return_me)
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)

@@ -38,7 +38,7 @@ else:
 
 # only turn this on if want more gory detail of big blocks of logging output and such
 # code_debugging is for all points of debugging
-code_debugging = False
+code_debugging = True
 # code_debugging_TODO is for only focused areas
 code_debugging_TODO = False
 
@@ -283,6 +283,8 @@ class IOSXEDevice(dict):
             super().__init__()
 
             self.ztp_log = get_logger()
+            self.deploy_catchall()
+
             # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
 
@@ -503,6 +505,26 @@ class IOSXEDevice(dict):
             print(e)
         # not really sending back list, but putting list wrapper to let it do %s
         return ztp_script
+
+    def deploy_catchall(self, app_label='ZTP-catchall'):
+        try:
+            self.ztp_log.info('called from %s()@%s with (app_label=%s)' %
+                               (inspect.stack()[1][3], inspect.stack()[1][2], app_label))
+            results = None
+            if app_label:
+                eem_commands = ['no event manager applet %s' % app_label,
+                                'event manager applet %s' % app_label,
+                                'event none maxrun 600',
+                                'event cli pattern ".*" sync no skip no',
+                                'action 1.0 syslog msg "[$_cli_username] $_cli_msg"',
+                                ]
+                self.do_configure(eem_commands)
+                results = True
+            self.ztp_log.debug('returning %s' % results)
+        except Exception as e:
+            self.ztp_log.debug('error occurred: %s' % type(e).__name__)
+            print(e)
+        return results
 
     def get_show_version(self):
         self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))

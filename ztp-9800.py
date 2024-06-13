@@ -1,10 +1,13 @@
-# TODO: docstrings .. top and functions
+# TODO: docstrings .. top and functions1
 
 # only turn this on if want more gory detail of big blocks of logging output and such
-# code_debugging is for all points of debugging
-code_debugging = False
-# code_debugging_TODO is for only focused areas
-code_debugging_TODO = False
+# do_code_debugging is for all points of debugging
+do_code_debugging = False
+# do_code_debugging_TODO is for only focused areas
+do_code_debugging_TODO = False
+# do_catchall routine for even deeper awareness
+do_catchall = do_code_debugging or do_code_debugging_TODO
+
 
 # traditional python modules
 import os
@@ -190,7 +193,7 @@ def main():
 def configure_logger(logger_name='ZTP'):
     logging.getLogger(logger_name)
     ztp_log = get_logger(logger_name)
-    if code_debugging or code_debugging_TODO:
+    if do_code_debugging or do_code_debugging_TODO:
         ztp_log.setLevel(logging.DEBUG)
     else:
         ztp_log.setLevel(logging.INFO)
@@ -247,7 +250,7 @@ def configure_logger(logger_name='ZTP'):
 
     # trigger a SYSLOG message as well using addFilter technique
     ztp_log.addFilter(eem_action_syslog)
-    if code_debugging or code_debugging_TODO:
+    if do_code_debugging or do_code_debugging_TODO:
         configure('logging trap debugging')
         ztp_log.info('configured logging trap debugging')
 
@@ -283,7 +286,7 @@ class IOSXEDevice(dict):
             super().__init__()
 
             self.ztp_log = get_logger()
-            self.deploy_catchall()
+            if do_catchall: self.deploy_catchall()
 
             # configure_logger() MUST come before all of these, as these all have embedded ztp_log calls
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
@@ -298,7 +301,7 @@ class IOSXEDevice(dict):
                 self.ztp_log.info('found SIM_ZTP_SCRIPT %s' % [self.ztp_script])
 
             # only after get_ztp_script .. logging buffered clears the log.. and breaks finding the "PNP" log message
-            if code_debugging or code_debugging_TODO: configure('logging buffered 200000000')
+            if do_code_debugging or do_code_debugging_TODO: configure('logging buffered 200000000')
 
             self.ztp_seed_defaults_file = None
             self.ztp_seed_defaults_contents = None
@@ -490,7 +493,7 @@ class IOSXEDevice(dict):
             self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
             ztp_script = TransferInfo_tuple_create(section='ztp_script')
             show_log = self.do_cli('show logging | inc PNP-6-PNP_SCRIPT_STARTED')
-            if code_debugging: self.ztp_log.debug('show_log is %s' % show_log)
+            if do_code_debugging: self.ztp_log.debug('show_log is %s' % show_log)
             results = re.search(pattern=r'%PNP-6-PNP_SCRIPT_STARTED:\s+Script\s+\((\S+)://(\S+)/(\S+)/(\S+)\)',
                                 string=show_log)
             if results:
@@ -531,7 +534,7 @@ class IOSXEDevice(dict):
         try:
             self.ztp_log.debug('called from %s()@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
             show_version = self.do_cli('show version')
-            if code_debugging: self.ztp_log.debug('found show_version \n%s' % show_version)
+            if do_code_debugging: self.ztp_log.debug('found show_version \n%s' % show_version)
             self.ztp_log.debug('returning \n%s' % show_version)
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
@@ -889,7 +892,7 @@ class IOSXEDevice(dict):
                 else:
                     self.ztp_log.warning('MD5 hashes do NOT match')
                     return_me = False
-            if code_debugging: self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
+            if do_code_debugging: self.ztp_log.debug('src_md5 is %s dst_md5 is %s' % (src_md5, dst_md5))
             self.ztp_log.info('is %s' % return_me)
             self.ztp_log.debug('returning %s' % return_me)
         except Exception as e:
@@ -960,7 +963,7 @@ class IOSXEDevice(dict):
             # only process if we have ini_file_contents and some structure to extract
             if ini_file_contents and structure:
                 # if doing advanced debuggging, dump a lot of details
-                if code_debugging_TODO: self.ztp_log.debug('ini_file_contents are \n%s' % ini_file_contents)
+                if do_code_debugging_TODO: self.ztp_log.debug('ini_file_contents are \n%s' % ini_file_contents)
                 # find the sections that partially match structure at the start
                 results = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
                                                        section=structure, section_partial=True)
@@ -969,7 +972,7 @@ class IOSXEDevice(dict):
                 # if get back a list of results, sort for processing
                 if isinstance(results, list): results.sort()
                 # if doing advanced debuggging, dump a lot of details
-                if code_debugging_TODO: self.ztp_log.debug(
+                if do_code_debugging_TODO: self.ztp_log.debug(
                     'ini_file_contents found %s partial sections %s' % (structure, results))
                 # results has the list of section names
                 structure_results = []

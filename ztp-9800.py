@@ -2,9 +2,9 @@
 
 # only turn this on if want more gory detail of big blocks of logging output and such
 # do_code_debugging is for all points of debugging
-do_code_debugging = False
+do_code_debugging = True
 # do_code_debugging_TODO is for only focused areas
-do_code_debugging_TODO = False
+do_code_debugging_TODO = True
 # do_catchall routine for even deeper awareness
 do_catchall = do_code_debugging or do_code_debugging_TODO
 
@@ -67,15 +67,20 @@ def TransferInfo_tuple_create(**kwargs):
     return transferit
 
 def TransferInfo_tuple_inherit(transferit_parent: TransferInfo_tuple = None, transferit_child: TransferInfo_tuple = None):
-    if transferit_parent and transferit_child:
-        for field in TransferInfo_tuple_field_names.split(' '):
+    # make sure we have some valid tuples to do the inherit task
+    if isinstance(transferit_parent, TransferInfo_tuple) and isinstance(transferit_child, TransferInfo_tuple):
+        # only inherit these field
+        TransferInfo_tuple_inherit = 'version_target xfer_mode username password hostname port path'
+        # step across the fields in the tuple
+        for field in TransferInfo_tuple_inherit.split(' '):
+            # if the child does not have this field, then inherit it from the parent
             if not transferit_child.__getattribute__(field) and transferit_parent.__getattribute__(field):
                 transferit_child = transferit_child._replace(**{field:transferit_parent.__getattribute__(field)})
     return transferit_child
 
 if not is_guestshell:
     # if not running under guestshell, simulate the data locally
-    SIM_ZTP_SCRIPT = TransferInfo_tuple_create(xfer_mode='scp',
+    SIM_ZTP_SCRIPT = TransferInfo_tuple_create(xfer_mode='scp2',
                                                hostname='10.0.0.301',
                                                path='ztp',
                                                filename='SIM-ztp-9800.py')
@@ -982,15 +987,16 @@ class IOSXEDevice(dict):
                         transferit = TransferInfo_tuple_create(section=section)
                         keys = self.extract_ini_section_key(ini_file_contents=ini_file_contents, section=section)
                         # only fetch keys for desired tuple
-                        keys = [item for item in keys if item in transferit._fields]
-                        # see if this section has any of our desired values
-                        for key in keys:
-                            key_val = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
-                                                                   section=section, key=key)
-                            if key_val:
-                                transferit = transferit._replace(**{key:key_val})
-                                self.ztp_log.debug('found %s' % [transferit])
-                        structure_results.append(transferit)
+                        if keys:
+                            keys = [item for item in keys if item in transferit._fields]
+                            # see if this section has any of our desired values
+                            for key in keys:
+                                key_val = self.extract_ini_section_key(ini_file_contents=ini_file_contents,
+                                                                       section=section, key=key)
+                                if key_val:
+                                    transferit = transferit._replace(**{key:key_val})
+                                    self.ztp_log.debug('found %s' % [transferit])
+                            structure_results.append(transferit)
                         self.ztp_log.debug('for section %s the full structure_results were %s' % (section, structure_results))
                 if structure_results:
                     for entry in structure_results:
@@ -1010,23 +1016,31 @@ class IOSXEDevice(dict):
         try:
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
             return_me = None
-            # only process if we have software_tree
             software_tree = {}
-            if software_map:
-                # convert the software_map into a software_tree dict
+            # only process if we have software_tree
+            if isinstance(software_map, list):
+                # convert the software_map list of TransferInfo_tuple entries into a software_tree hierarch dict
                 for entry in software_map:
+                    # decompose the packed section name into the hierarch points
                     hier = entry.section.split(':')
-                    # for the top two levels, insert default as the model else software
-                    if len(hier) < 4 : hier.append('default')
+                    # set the point where going this graft of information to the top of the software_tree
                     graft = software_tree
+                    # step across the levels and start to nest the information
                     for level in hier:
+                        # remember where we currently are grafting at the moment
                         graftlast = graft
+                        # if this new level does not exist .. aka a level can be repeated across the software_map list
+                        # .. then create that level in the hierarch
                         if not level in graft: graft[level] = {}
+                        # now set the new graft point to the next level
                         graft = graft[level]
-                    graftlast.update({level: entry})
+                        if level == hier[-1]:
+                            # now that we are fully nested per the un-packed section name, udpate the entry
+                            graft.update({'default': entry})
 
                 # embedded recursion function for going down tree
                 def tree_inherit(tree_node = None, transferit_inherit: TransferInfo_tuple = None):
+                    # if this node is basically a final leaf tuple and have a valid inherit tuple then inherit
                     if isinstance(tree_node, TransferInfo_tuple) and isinstance(transferit_inherit, TransferInfo_tuple):
                         tree_node = TransferInfo_tuple_inherit(transferit_parent=transferit_inherit, transferit_child=tree_node)
                     else:

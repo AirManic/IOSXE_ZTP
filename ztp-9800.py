@@ -2,9 +2,9 @@
 
 # only turn this on if want more gory detail of big blocks of logging output and such
 # do_code_debugging is for all points of debugging
-do_code_debugging = True
+do_code_debugging = False
 # do_code_debugging_TODO is for only focused areas
-do_code_debugging_TODO = True
+do_code_debugging_TODO = False
 # do_catchall routine for even deeper awareness
 do_catchall = do_code_debugging or do_code_debugging_TODO
 
@@ -119,9 +119,10 @@ def main():
         self.ztp_log.info('********** ZTP CHECK UPGRADE_REQUIRED **********')
         if self.upgrade_required:
             # TODO: add SMU and APSP & APDP support
-            for component in 'IMG SMU APDP APSP WEB':
-                self.ztp_log.info('********** ZTP %s **********' % code_phase)
+            for component in 'IMG SMU APDP APSP WEB'.split(' '):
+                self.ztp_log.info('********** ZTP %s **********' % component)
                 # step across each file.. and if it is a nested dict, step across the nesting
+                self.ztp_log.info('TODO: %s' % self.version_tar_map)
                 for entry in self.version_tar_map[component]:
                     if not self.check_file_exists(filename=entry.filename):
                         self.ztp_log.info('attempting to transfer filename to device')
@@ -323,8 +324,9 @@ class IOSXEDevice(dict):
                     # if not running under guestshell, simulate the data locally
                     self.ztp_log.info('********** ZTP IOSXEDevice() ... SIM_ZTP_SEED_DEFAULTS_CONTENTS **********')
                     self.ztp_seed_defaults_file = transferit
-                    with open(self.ztp_seed_defaults_file.filename, 'r') as file:
-                        self.ztp_seed_defaults_contents = file.read()
+                    if os.path.isfile(self.ztp_seed_defaults_file.filename):
+                        with open(self.ztp_seed_defaults_file.filename, 'r') as file:
+                            self.ztp_seed_defaults_contents = file.read()
 
             self.xfer_servers = None
             self.basic_access_commands = None
@@ -413,8 +415,9 @@ class IOSXEDevice(dict):
                     self.ztp_log.info(
                         '********** ZTP IOSXEDevice() ... SIM_DEVICE_SEED_DEFAULTS_CONTENTS **********')
                     self.device_seed_file = transferit
-                    with open(self.device_seed_file.filename, 'r') as file:
-                        self.device_seed_file_contents = file.read()
+                    if os.path.isfile(self.device_seed_file.filename):
+                        with open(self.device_seed_file.filename, 'r') as file:
+                            self.device_seed_file_contents = file.read()
 
             ini_file_contents = self.device_seed_file_contents
 
@@ -468,8 +471,9 @@ class IOSXEDevice(dict):
                     self.ztp_log.info(
                         '********** ZTP IOSXEDevice() ... SIM_DEVICE_CONFIG_FILE_CONTENTS **********')
                     self.device_config_file = transferit
-                    with open(self.device_config_file.filename, 'r') as file:
-                        self.device_config_file_contents = file.read()
+                    if os.path.isfile(self.device_config_file.filename):
+                        with open(self.device_config_file.filename, 'r') as file:
+                            self.device_config_file_contents = file.read()
 
             self.ztp_log.info('********** ZTP IOSXEDevice() ... chassis_cur & chassis_tar **********')
             self.chassis_cur = self.get_chassis_cur()
@@ -477,13 +481,7 @@ class IOSXEDevice(dict):
 
             self.ztp_log.info('********** ZTP IOSXEDevice() ... version_tar **********')
             # TODO: version_tar_map
-            self.version_tar = self.get_version_tar()
-            self.version_tar_map = None
-            # load this with the respective part of the software_table from the software_map .. use self.device_software_map then self.software_map
-            self.version_tar_map = {
-                'img': TransferInfo_tuple_create(filename='C9800-L-universalk9_wlc.17.09.04a.SPA.bin',
-                                                 md5='70d8a8c0009fc862349a200fd62a0244'),
-            }
+            (self.version_tar, self.version_tar_map) = self.get_version_tar()
 
             self.ztp_log.info('********** ZTP IOSXEDevice() ... upgrade_required **********')
             self.upgrade_required = self.check_upgrade_required(self.version_cur, self.version_tar)
@@ -687,13 +685,38 @@ class IOSXEDevice(dict):
         try:
             self.ztp_log.info('called from %s@%s' % (inspect.stack()[1][3], inspect.stack()[1][2]))
             # TODO process tables to yield serial, software, global pecking order
-            version_tar = None
-            self.ztp_log.info('is %s' % version_tar)
-            self.ztp_log.debug('returning %s' % version_tar)
+            device_tar = None
+            device_tar_map = None
+            # look for model with the longest starts with match in section
+            # .. first check overall software_tree
+            if self.software_tree:
+                results_to_check = sorted(self.software_tree.keys())
+                results = [i for i in sorted(self.software_tree.keys()) if self.model.startswith(i)]
+            fetch_model = None
+            if results: fetch_model = results[-1]
+            if fetch_model: device_tar_map = self.software_tree[fetch_model]
+            if 'default' in device_tar_map.keys():
+                if isinstance(device_tar_map['default'], TransferInfo_tuple):
+                    device_tar = device_tar_map['default'].version_target
+            # .. now check device_software_tree to see if there is a more preferred choice
+            if self.device_software_tree:
+                results_to_check = sorted(self.device_software_tree.keys())
+                results = [i for i in sorted(self.device_software_tree.keys()) if self.model.startswith(i)]
+            fetch_model = None
+            if results: fetch_model = results[-1]
+            # if had a hit in either software_tree or device_software_tree, go fetch the version_target
+            if fetch_model: device_tar_map = self.device_software_tree[fetch_model]
+            if 'default' in device_tar_map.keys():
+                if isinstance(device_tar_map['default'], TransferInfo_tuple):
+                    device_tar = device_tar_map['default'].version_target
+            # .. extract the version target from the
+            self.ztp_log.info('device_tar     is %s' % device_tar)
+            self.ztp_log.info('device_tar_map is %s' % [device_tar_map])
+            self.ztp_log.debug('returning %s' % [(device_tar, device_tar_map)])
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
             print(e)
-        return version_tar
+        return (device_tar, device_tar_map)
 
     def configure_replace(self, filename: str = None, filesys: str = IOSXEDEVICE_FILESYS_DEFAULT):
         try:
@@ -872,7 +895,7 @@ class IOSXEDevice(dict):
                               (inspect.stack()[1][3], inspect.stack()[1][2], version_cur, version_tar))
             return_me = None
             if version_cur and version_tar:
-                return_me = version_cur == version_tar
+                return_me = not version_cur == version_tar
                 self.ztp_log.info('is %s' % return_me)
             self.ztp_log.debug('returning %s' % return_me)
         except Exception as e:
@@ -941,7 +964,7 @@ class IOSXEDevice(dict):
                     self.ztp_log.debug('found section=%s %s' % (section, [results]))
                 elif section and not key and section_partial:
                     # .. look for model with the longest starts with match in section
-                    results = [i for i in config.sections() if i.startswith(section)]
+                    results = [i for i in sorted(config.sections()) if i.startswith(section)]
                     self.ztp_log.debug('found section=%s %s' % (section, results))
             if results: return_me = results
             self.ztp_log.debug('returning %s' % return_me)
@@ -1056,7 +1079,8 @@ class IOSXEDevice(dict):
 
                 if software_tree and seed_transferit:
                     software_tree = tree_inherit(tree_node=software_tree, transferit_inherit=seed_transferit)
-            return_me = software_tree
+            if 'software_map' in software_tree.keys():
+                return_me = software_tree['software_map']
             self.ztp_log.debug('returning %s' % return_me)
         except Exception as e:
             self.ztp_log.debug('error occurred: %s' % type(e).__name__)
